@@ -1,3 +1,4 @@
+import numpy
 import torch
 from torch import nn
 
@@ -11,7 +12,7 @@ import pickle
 
 from network import ATNetwork
 from memory import ReplayBuffer
-from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions
+from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
 
 
 import warnings
@@ -66,24 +67,24 @@ class ATGEN(nn.Module):
         """
         self.fitness_scores = [0.0] * len(self.population)
 
-        for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100)):
+        for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=85)):
             self.fitness_scores[i] = self.fitness_fn(network)
         
         # args = [(i, network, self.fitness_fn) for i, network in enumerate(self.population)]
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for index, fitness_score in tqdm(pool.imap_unordered(evaluate_fitness_single, args), total=len(args), desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100):
+        #     for index, fitness_score in tqdm(pool.imap_unordered(evaluate_fitness_single, args), total=len(args), desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=85):
         #         self.fitness_scores[index] = fitness_score
 
     def evaluate_learn(self):
         """
         """
-        for genome in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
+        for genome in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=85):
             self.backprob_fn(genome)
 
         # args = [(genome, self.learn_fn) for genome in self.population]
 
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=100):
+        #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=85):
         #         pass
 
     def select_parents(self) -> Tuple[ATNetwork, ATNetwork]:
@@ -211,12 +212,14 @@ class ATGEN(nn.Module):
         self.evaluate_fitness()
 
         # preview training data
-        fitness = max(self.fitness_scores)
-        color = GREEN if fitness > self.best_fitness else GRAY if fitness > self.last_fitness else RED
-        print(f'{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness}{RESET_COLOR}')
-        self.last_fitness = fitness
-        if fitness > self.best_fitness: 
-            self.best_fitness = fitness 
+        max_fitness = max(self.fitness_scores)
+        min_fitness = min(self.fitness_scores)
+        mean_fitness = numpy.mean(self.fitness_scores)
+        color = GREEN if max_fitness > self.best_fitness else GRAY if max_fitness > self.last_fitness else RED
+        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ max_fitness }{RESET_COLOR}"
+        self.last_fitness = max_fitness 
+        if max_fitness > self.best_fitness: 
+            self.best_fitness = max_fitness 
             self.memory.clear()
 
         # selection of parents
@@ -230,12 +233,14 @@ class ATGEN(nn.Module):
         self.population = sorted_population[:self.population_size//2]  # Select top 50%
         
         new_population: List[ATNetwork] = []
-        for _ in tqdm(range(self.population_size//2), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
+        for _ in tqdm(range(self.population_size//2), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=85):
             parent1, parent2 = self.select_parents()
             child = self.crossover(parent1, parent2)
             self.mutate(child)
             new_population.append(child)
         self.population.extend(new_population)
+        print(print_current_best)
+        print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
         self.population[0].summary()
 
         # use best genome to make experiences
@@ -246,15 +251,16 @@ class ATGEN(nn.Module):
         if self.backprob_phase:
             self.evaluate_learn()
 
+        print_stats_table(self.best_fitness, max_fitness, mean_fitness, min_fitness, self.population_size)
         self.save_population()
-        return fitness
+        return max_fitness, mean_fitness, min_fitness
 
-    def evolve(self, generation: int=None, fitness: int=None, save_name: str=None):
+    def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
         last_fitness = -float("inf")
         if generation is not None:
                 for i in range(generation):
                     print(f"\n--- {BLUE}Generation {i+1}{RESET_COLOR} ---")
-                    last_fitness = self.run_generation()
+                    last_fitness = self.run_generation()[metrics]
                     if fitness is not None:
                         if last_fitness >= fitness:
                             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
@@ -265,7 +271,7 @@ class ATGEN(nn.Module):
             while fitness > last_fitness:
                 generation += 1
                 print(f"\n--- {BLUE}Generation {generation}{RESET_COLOR} ---")
-                last_fitness = self.run_generation()
+                last_fitness = self.run_generation()[metrics]
             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
             
         else:
@@ -273,6 +279,11 @@ class ATGEN(nn.Module):
         
         if save_name is not None:
             self.population[0].save_network(save_name)
+
+        if plot:
+            "plot using matplotlib"
+        else:
+            return "max, mean, min"
     
     def fitness_fn(self, genome):
         raise NotImplementedError("implement fitness_fn method")

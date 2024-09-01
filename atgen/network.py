@@ -5,7 +5,12 @@ from torch import nn
 from typing import List
 import random
 from utils import BLUE, BOLD, RESET_COLOR
-from layers import Linear, ActiSwitch, Pass
+from layers.activations import ActiSwitch, Pass
+from layers.linear import Linear
+from layers.conv import Conv2D
+from layers.maxpool import MaxPool2D
+
+from math import fabs as abs
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -94,7 +99,7 @@ class ATNetwork(nn.Module):
         Modifies:
             Adds Gaussian noise to the weights of the network with a probability defined by 'mutation_rate'.
         """
-        for param in self.layers.parameters():
+        for param in self.parameters():
             if random.random() < mutation_rate:
                 noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
                 param.add_(noise)
@@ -127,7 +132,7 @@ class ATNetwork(nn.Module):
             threshold (float): The threshold below which neurons will be pruned.
         """
         for i, layer in enumerate(self.layers[:-1]):
-            if (isinstance(layer, Linear) or str(type(layer)) == "<class 'layers.Linear'>") and layer.out_features > 1:
+            if (isinstance(layer, Linear) or str(type(layer)) == "<class 'layers.linear.Linear'>") and layer.out_features > 1:
                 try:
                     # Identify neurons to prune
                     neurons_to_prune = []
@@ -171,7 +176,7 @@ class ATNetwork(nn.Module):
             
             # Format each layer's information with fixed-width columns
             try:
-                layer_info = f"Layer {i+1:<5}{(f'(batch_size, {layer.out_features})'):<30}{layer.params_count:<15}{activation.__class__.__name__}({activation.activation.__class__.__name__}, {100*(activation.activation_weight.item()/(activation.linear_weight.item()+activation.activation_weight.item())):.2f}%)"
+                layer_info = f"Layer {i+1:<5}{(f'(batch_size, {layer.out_features})'):<30}{layer.params_count:<15}{activation.__class__.__name__}({activation.activation.__class__.__name__}, {100*(abs(activation.activation_weight.item())/(abs(activation.linear_weight.item())+abs(activation.activation_weight.item()))):.2f}%)"
             except:
                 layer_info = f"Layer {i+1:<5}{(f'(batch_size, {layer.out_features})'):<30}{layer.params_count:<15}{activation.__class__.__name__:<15}"
             print(layer_info)
@@ -228,8 +233,6 @@ if __name__ == "__main__":
 
     print(torch.cat((y1, y2),  dim=1))  
     loss(y1, y2)
-
-
 
 
 

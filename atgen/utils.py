@@ -1,4 +1,4 @@
-import math
+
 import torch.nn as nn
 
 
@@ -30,37 +30,20 @@ GRAY = "\033[90m"
 BOLD = "\033[1m"
 RESET_COLOR = "\033[0m"
 
+from layers.utils import conv2d_output_size, calculate_linear_input_features
 
-def conv2d_output_size(input_size, kernel_size, padding, stride):
-    """
-    Calculate the output size (height or width) of a Conv2D layer.
+from tabulate import tabulate
 
-    Parameters:
-    - input_size: int, the size of the input (height or width)
-    - kernel_size: int, the size of the convolution kernel (height or width)
-    - padding: int, the size of the padding added to each side
-    - stride: int, the stride of the convolution
+def print_stats_table(best, maximum, mean, minimum, population):
+    headers = ["Best", "Maximum", "Mean", "Minimum", "Population"]
+    table = [[best, maximum, mean, minimum, population]]
+    print(tabulate(table, headers, tablefmt="fancy_grid"))
 
-    Returns:
-    - int, the output size after applying the Conv2D layer
-    """
-    return math.floor((input_size + 2 * padding - kernel_size) / stride) + 1
 
-def calculate_linear_input_features(input_height, input_width, out_channels, kernel_size, padding, stride):
-    """
-    Calculate the number of input features for a linear layer after a Conv2D layer.
+if __name__ == "__main__":
+    # Example usage
+    best_value = 0.85
+    mean_value = 0.75
+    min_value = 0.65
 
-    Parameters:
-    - input_height: int, the height of the input to the Conv2D layer
-    - input_width: int, the width of the input to the Conv2D layer
-    - out_channels: int, the number of output channels of the Conv2D layer
-    - kernel_size: int, the size of the convolution kernel (assuming square kernel)
-    - padding: int, the size of the padding added to each side
-    - stride: int, the stride of the convolution
-
-    Returns:
-    - int, the number of input features for the subsequent linear layer
-    """
-    output_height = conv2d_output_size(input_height, kernel_size, padding, stride)
-    output_width = conv2d_output_size(input_width, kernel_size, padding, stride)
-    return out_channels * output_height * output_width
+    print_stats_table(best_value, mean_value, min_value)
