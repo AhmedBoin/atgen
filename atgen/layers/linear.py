@@ -4,6 +4,33 @@ from torch import nn
 import torch.nn.functional as F
 
 
+
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
+    
+    def store_sizes(self, input_size, channels):
+        self.input_size = input_size
+        self.output_size: int = input_size[0] * input_size[1] * channels
+        self.channels = channels
+        return self.output_size, self.channels
+    
+    @property
+    def params_count(self):
+        """
+        Get the count of parameters in the flatten layer (which is always zero).
+
+        Returns:
+            int: The number of parameters (always 0).
+        """
+        return 0
+    
+    def print_layer(self, i: int):
+        print(f"Layer {i+1:<5}{self.__class__.__name__:<15}{(f'(batch_size, {self.output_size})'):<30}{self.params_count:<15}", end="")
+    
+
+    
+
 class Linear(nn.Module):
     """
     A custom fully connected linear layer that allows dynamic addition and removal of neurons 
@@ -17,34 +44,10 @@ class Linear(nn.Module):
         weight (torch.nn.Parameter): The learnable weight matrix of shape (out_features, in_features).
         bias (torch.nn.Parameter or None): The learnable bias vector of shape (out_features,). 
                                            If `bias` is set to `False`, no bias vector will be used.
-
-    Methods:
-        reset_parameters() -> None:
-            Initializes the weights and biases of the layer using Kaiming uniform initialization.
-        
-        forward(input: torch.Tensor) -> torch.Tensor:
-            Performs the forward pass by applying a linear transformation to the input tensor.
-
-        add_neuron() -> None:
-            Adds a new output neuron to the layer, initializing its weights and bias to small values.
-        
-        add_weight() -> None:
-            Increases the input dimension by adding a new input weight to each output neuron, initialized to zero.
-        
-        remove_neuron(index: int) -> None:
-            Removes a specific output neuron from the layer based on the given index.
-        
-        remove_weight(index: int) -> None:
-            Removes a specific input weight from each output neuron based on the given index.
-        
-        init_identity_layer(size: int, bias: bool=True) -> Linear:
-            Class method to create a Linear layer with identity-like initialization. 
-            Useful for initializing a layer to behave as an identity function for square matrices.
-        
-        params_count() -> int:
-            Returns the total number of learnable parameters in the layer, including both weights and biases.
+        normalization (nn.Module or None): The normalization layer to apply after the linear transformation.
     """
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, norm_type: str = None):
         """
         Initializes the Linear layer with specified input and output features, and optionally a bias.
 
@@ -53,16 +56,23 @@ class Linear(nn.Module):
             out_features (int): The number of output features.
             bias (bool, optional): If `True`, a learnable bias vector is included in the layer. 
                                    Defaults to `True`.
+            norm_type (str, optional): Type of normalization to use ('batch' or 'layer'). Defaults to `None`.
         """
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_features))
-        else:
-            self.register_parameter('bias', None)
+        self.bias = nn.Parameter(torch.Tensor(out_features)) if bias else None
+        
         self.reset_parameters()
+
+        # Initialize the normalization layer based on the norm_type parameter
+        if norm_type == 'batch':
+            self.normalization = nn.BatchNorm1d(out_features)
+        elif norm_type == 'layer':
+            self.normalization = nn.LayerNorm(out_features)
+        else:
+            self.normalization = None
 
     def reset_parameters(self):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
@@ -72,7 +82,10 @@ class Linear(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, self.weight, self.bias)
+        output = F.linear(input, self.weight, self.bias)
+        if self.normalization:
+            output = self.normalization(output)
+        return output
 
     def add_neuron(self):
         """Add a new output neuron with weights initialized to a small value."""
@@ -92,6 +105,13 @@ class Linear(nn.Module):
 
         self.out_features += 1
 
+        # Update normalization layer if it exists
+        if self.normalization:
+            if isinstance(self.normalization, nn.BatchNorm1d):
+                self.normalization = nn.BatchNorm1d(self.out_features)
+            elif isinstance(self.normalization, nn.LayerNorm):
+                self.normalization = nn.LayerNorm(self.out_features)
+
     def add_weight(self):
         """Increase the input dimension by adding a new input weight to each output neuron with a small value."""
         new_weight_column = torch.zeros((self.out_features, 1), device=self.weight.device)
@@ -110,6 +130,13 @@ class Linear(nn.Module):
         
         self.out_features -= 1
 
+        # Update normalization layer if it exists
+        if self.normalization:
+            if isinstance(self.normalization, nn.BatchNorm1d):
+                self.normalization = nn.BatchNorm1d(self.out_features)
+            elif isinstance(self.normalization, nn.LayerNorm):
+                self.normalization = nn.LayerNorm(self.out_features)
+
     def remove_weight(self, index: int):
         """Remove a specific input weight from each output neuron."""
         if index < 0 or index >= self.in_features:
@@ -118,25 +145,56 @@ class Linear(nn.Module):
         self.weight = nn.Parameter(torch.cat([self.weight.data[:, :index], self.weight.data[:, index + 1:]], dim=1))
         self.in_features -= 1
 
+    def reduce_dimensionality(self, method='variance'):
+        """
+        Reduces the dimensionality of the input by removing the least important input feature.
+
+        Args:
+            method (str): The method to use for determining feature importance ('variance' or 'correlation').
+        """
+        if method not in ['variance', 'correlation']:
+            raise ValueError("Invalid method for dimensionality reduction. Choose 'variance' or 'correlation'.")
+
+        with torch.no_grad():
+            # Calculate feature importance based on the selected method
+            if method == 'variance':
+                feature_importances = torch.var(self.weight.data, dim=0)
+            elif method == 'correlation':
+                output = F.linear(torch.eye(self.in_features, device=self.weight.device), self.weight, self.bias)
+                feature_importances = torch.abs(torch.corrcoef(output.T)[:, -1])
+
+            # Find the index of the feature with the least importance
+            least_important_feature_index = torch.argmin(feature_importances)
+
+            # Remove the least important input weight
+            self.remove_weight(least_important_feature_index)
+
+            # Adjust remaining weights if necessary
+            # For simplicity, let's renormalize the weights to maintain output scale
+            self.weight.data *= (1 / (self.weight.data.norm(dim=1, keepdim=True) + 1e-6))
+
+            # Update the normalization layer if it exists
+            if self.normalization:
+                if isinstance(self.normalization, nn.BatchNorm1d):
+                    self.normalization = nn.BatchNorm1d(self.out_features)
+                elif isinstance(self.normalization, nn.LayerNorm):
+                    self.normalization = nn.LayerNorm(self.out_features)
+
     @classmethod
-    def init_identity_layer(cls, size: int, bias: bool=True):
+    def init_identity_layer(cls, size: int, bias: bool=True, norm_type: str = None):
         """
         Class method to create a Linear layer with identity-like initialization.
         
         Args:
             size (int): Number of input and output features (must be the same).
             bias (bool): Whether to include a bias term.
+            norm_type (str): Type of normalization to use ('batch' or 'layer'). Defaults to `None`.
         
         Returns:
             Linear: An instance of Linear initialized as an identity layer.
         """
-        
-        layer = cls(in_features=size, out_features=size, bias=bias)
-        layer.weight.data = torch.zeros_like(layer.weight.data)
-
-        with torch.no_grad():
-            for i in range(size):
-                layer.weight.data[i, i] = 1.0
+        layer = cls(in_features=size, out_features=size, bias=bias, norm_type=norm_type)
+        layer.weight.data = torch.eye(size, size)
 
         if bias:
             layer.bias.data = torch.zeros_like(layer.bias.data)
@@ -147,6 +205,22 @@ class Linear(nn.Module):
     def params_count(self):
         return self.weight.data.numel() + (self.bias.data.numel() if self.bias is not None else 0)
     
+    def print_layer(self, i: int):
+        print(f"Layer {i+1:<5}{self.__class__.__name__:<15}{(f'(batch_size, {self.out_features})'):<30}{self.params_count:<15}", end="")
+    
+
+class LazyLinear(Linear):
+    def __init__(self, out_features: int, bias: bool = True, norm_type: str = None, input_size=None):
+        if input_size is not None:
+            super(LazyLinear, self).__init__(input_size, out_features, bias, norm_type)
+        self.out_features = out_features
+        self.bias = bias
+        self.norm_type = norm_type
+        
+    def custom_init(self, input_size):
+        super(LazyLinear, self).__init__(input_size, self.out_features, self.bias, self.norm_type)
+        return self.out_features
+
 
 if __name__ == "__main__":
     # helper loss function

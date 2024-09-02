@@ -4,11 +4,12 @@ from torch import nn
 
 from typing import List
 import random
+from inspect import isfunction
+
 from utils import BLUE, BOLD, RESET_COLOR
 from layers.activations import ActiSwitch, Pass
-from layers.linear import Linear
-from layers.conv import Conv2D
-from layers.maxpool import MaxPool2D
+from layers.linear import Linear, Flatten, LazyLinear
+from layers.conv import Conv2D, MaxPool2D, LazyConv2D
 
 from math import fabs as abs
 
@@ -22,7 +23,7 @@ class ATNetwork(nn.Module):
     This class provides methods to dynamically change the network architecture, 
     such as adding or removing layers, evolving weights, and modifying activation functions.
     """
-    def __init__(self, layers: List[int]=None, activation=nn.ReLU(), last_activation=None, bias=True, backprob_phase=True):
+    def __init__(self, *layers, activation=nn.ReLU, last_activation=None, bias=True, backprob_phase=True, input_size=None):
         """
         Initialize the ATNetwork.
 
@@ -32,27 +33,51 @@ class ATNetwork(nn.Module):
             last_activation (nn.Module, optional): The activation function to use in the last layer. Defaults to None (no activation).
             bias (bool, optional): Whether to include bias terms in the layers. Defaults to True.
             backprob_phase (bool, optional): Indicates if back propagation learning-based evolution is enabled. Defaults to True.
-
-        Raises:
-            NotImplementedError: If the network is not properly initialized through the constructor.
         """
         super(ATNetwork, self).__init__()
-        if layers:
+        if isinstance(layers[0], int):
             self.layers = nn.ModuleList([Linear(layers[idx], layers[idx + 1], bias) for idx in range(len(layers) - 1)])
             self.activation = nn.ModuleList([
                 *[ActiSwitch(activation, backprob_phase) for _ in range(len(layers) - 2)], 
                 Pass() if last_activation is None else last_activation
             ])
-            self.backprob_phase = backprob_phase
-            self.default_activation = activation
         else:
-            raise NotImplementedError("you should implement the Network using constructor or inherit class and make your own implementation")
+            self.layers = nn.ModuleList()
+            self.activation = nn.ModuleList()
+            for layer in layers:
+                if isinstance(layer, ActiSwitch):
+                    if len(self.activation) > 0: # if ActiSwitch is the first layer
+                        self.activation.pop(-1)
+                    else:
+                        self.layers.append(Pass()) # this entire condition should be self.activation.pop(-1) without handling this case
+                    self.activation.append(layer)
+                else:
+                    self.layers.append(layer)
+                    self.activation.append(Pass())
+
+            if input_size is not None:
+                for layer in self.layers:
+                    if isinstance(layer, Conv2D):
+                        input_size, channels = layer.store_sizes(input_size)
+                    elif isinstance(layer, MaxPool2D):
+                        input_size, channels = layer.store_sizes(input_size, channels)
+                    elif isinstance(layer, LazyConv2D):
+                        layer.custom_init(channels)
+                        input_size, channels = layer.store_sizes(input_size)
+                    elif isinstance(layer, Flatten):
+                        input_size, channels = layer.store_sizes(input_size, channels)
+                    elif isinstance(layer, LazyLinear):
+                        input_size = layer.custom_init(input_size)
+
+        self.backprob_phase = backprob_phase
+        self.default_activation = activation
 
 
     def forward(self, x: torch.Tensor):
         for i in range(len(self.layers)):
             x = self.activation[i](self.layers[i](x))
         return x
+    
 
     def evolve_network(self, idx=None):
         """
@@ -132,7 +157,7 @@ class ATNetwork(nn.Module):
             threshold (float): The threshold below which neurons will be pruned.
         """
         for i, layer in enumerate(self.layers[:-1]):
-            if (isinstance(layer, Linear) or str(type(layer)) == "<class 'layers.linear.Linear'>") and layer.out_features > 1:
+            if isinstance(layer, Linear) and layer.out_features > 1:
                 try:
                     # Identify neurons to prune
                     neurons_to_prune = []
@@ -162,29 +187,19 @@ class ATNetwork(nn.Module):
 
     @torch.no_grad()
     def summary(self):
-        print(f"{BOLD}{BLUE}Model Summary{RESET_COLOR}{BOLD}:")  # Bold text for the title
-        print("-" * 85)
-
-        # Define and print column headers
-        headers = f"{'Layer':<11}{'Output Shape':<30}{'Parameters':<15}{'Activation':<15}"
-        print(headers)
-        print("-" * 85)
+        print(f"{BOLD}{BLUE}Model Summary{RESET_COLOR}{BOLD}:")
+        print("-" * 100)
+        print(f"{'Layer':<11}{'Type':<15}{'Output Shape':<30}{'Parameters':<15}{'Activation':<15}")
+        print("-" * 100)
 
         total_param = 0
         for i, (layer, activation) in enumerate(zip(self.layers, self.activation)):
             total_param += layer.params_count
-            
-            # Format each layer's information with fixed-width columns
-            try:
-                layer_info = f"Layer {i+1:<5}{(f'(batch_size, {layer.out_features})'):<30}{layer.params_count:<15}{activation.__class__.__name__}({activation.activation.__class__.__name__}, {100*(abs(activation.activation_weight.item())/(abs(activation.linear_weight.item())+abs(activation.activation_weight.item()))):.2f}%)"
-            except:
-                layer_info = f"Layer {i+1:<5}{(f'(batch_size, {layer.out_features})'):<30}{layer.params_count:<15}{activation.__class__.__name__:<15}"
-            print(layer_info)
+            layer.print_layer(i)
+            activation.print_layer(i)
 
-        print("-" * 85)
+        print("-" * 100)
         print(f"{BLUE}{'Total Parameters:':<25}{RESET_COLOR}{BOLD}{total_param:<15}{RESET_COLOR}")
-
-
 
 
 if __name__ == "__main__":
@@ -194,7 +209,7 @@ if __name__ == "__main__":
         print(f"loss = {val:.10f}%")
 
 
-    model = ATNetwork([5, 3, 2, 1])
+    model = ATNetwork(5, 3, 2, 1)
     class CustomNetwork(ATNetwork):
         def __init__(self):
             # Do not call the parent __init__ with layers; initialize manually, Directly call nn.Module's init
@@ -208,7 +223,7 @@ if __name__ == "__main__":
                 Pass()
             ])
             self.backprob_phase = True
-            self.default_activation = nn.ReLU()
+            self.default_activation = nn.ReLU
 
     model = CustomNetwork()
     model.summary()
@@ -233,6 +248,38 @@ if __name__ == "__main__":
 
     print(torch.cat((y1, y2),  dim=1))  
     loss(y1, y2)
+
+
+    # Sequential implementation
+    import torch.nn.functional as F
+    model = ATNetwork(
+        Linear(10, 5),
+        ActiSwitch(F.relu),
+        Linear(5, 3),
+        Linear(3, 3),
+        ActiSwitch(nn.ReLU),
+        Linear(3, 1),
+    )
+    model.summary()
+
+    model = ATNetwork(
+        Conv2D(3, 32, kernel_size=3),
+        ActiSwitch(nn.ReLU),
+        Conv2D(32, 32, kernel_size=3),
+        ActiSwitch(nn.ReLU),
+        MaxPool2D(),
+        Conv2D(32, 64, kernel_size=3),
+        ActiSwitch(nn.ReLU),
+        Conv2D(64, 64, kernel_size=3),
+        ActiSwitch(nn.ReLU),
+        MaxPool2D(),
+        Flatten(),
+        LazyLinear(100),
+        ActiSwitch(nn.ReLU),
+        LazyLinear(1),
+        input_size=(28, 28)
+    )
+    model.summary()
 
 
 

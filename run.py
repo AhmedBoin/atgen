@@ -15,7 +15,7 @@ env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, layers: F.List[int]):
-        super().__init__(population_size, layers, activation=torch.nn.ReLU(), last_activation=Pass(), batch_size=128, backprob_phase=False, experiences_phase=False, 
+        super().__init__(population_size, layers, activation=torch.nn.ReLU, last_activation=Pass(), batch_size=128, backprob_phase=True, experiences_phase=True, 
                          weight_mutation_rate=0.3, perturbation_rate=0.3, layer_mutation_rate=0, network_mutation_rate=0, activation_mutation_rate=0)
 
     def fitness_fn(self, model: ATNetwork):
@@ -56,7 +56,7 @@ class NeuroEvolution(ATGEN):
     @torch.no_grad()
     def experiences_fn(self, model: ATNetwork):
         epochs = 10
-        gamma = 0.99  # Set gamma to a suitable value for discounting future rewards
+        gamma = 0.80  # Set gamma to a suitable value for discounting future rewards
         env = gym.make("LunarLander-v2")
         
         for _ in range(epochs):

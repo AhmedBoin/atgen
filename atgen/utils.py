@@ -3,21 +3,21 @@ import torch.nn as nn
 
 
 activation_functions = [
-    nn.ReLU(),
-    nn.Sigmoid(),
-    nn.Tanh(),
-    nn.LeakyReLU(),
-    nn.ELU(),
-    nn.SELU(),
-    nn.GELU(),
-    nn.Softplus(),
-    nn.Softsign(),
-    nn.Hardtanh(),
-    nn.ReLU6(),
-    nn.CELU(),
-    nn.Hardswish(),
-    nn.Hardsigmoid(),
-    nn.Mish(),
+    nn.ReLU,
+    nn.Sigmoid,
+    nn.Tanh,
+    nn.LeakyReLU,
+    nn.ELU,
+    nn.SELU,
+    nn.GELU,
+    nn.Softplus,
+    nn.Softsign,
+    nn.Hardtanh,
+    nn.ReLU6,
+    nn.CELU,
+    nn.Hardswish,
+    nn.Hardsigmoid,
+    nn.Mish,
 ]
 
 # ANSI escape codes for colors
@@ -30,7 +30,6 @@ GRAY = "\033[90m"
 BOLD = "\033[1m"
 RESET_COLOR = "\033[0m"
 
-from layers.utils import conv2d_output_size, calculate_linear_input_features
 
 from tabulate import tabulate
 

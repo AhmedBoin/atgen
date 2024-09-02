@@ -22,7 +22,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class ATGEN(nn.Module):
     memory: ReplayBuffer = None
-    def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU(), last_activation=None, bias=True, 
+    def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU, last_activation=None, bias=True, 
                  weight_mutation_rate=0.8, perturbation_rate=0.9, layer_mutation_rate=0.2, network_mutation_rate=0.01, 
                  activation_mutation_rate=0.001, threshold=0.01, activation_dict: List[nn.Module]=None, 
                  buffer_size = int(1e5), batch_size: int = 64, backprob_phase=False, experiences_phase=False, device="cpu"):
@@ -54,7 +54,7 @@ class ATGEN(nn.Module):
         self.experiences_phase = experiences_phase
         
         # Initialize the population
-        self.population = [ATNetwork(layers, activation, last_activation, bias, backprob_phase).to(device) for _ in range(population_size)]
+        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias, backprob_phase=backprob_phase).to(device) for _ in range(population_size)]
         self.fitness_scores = [0.0] * population_size
         self.selection_probs = self.fitness_scores
         self.best_fitness = float("-inf")
@@ -67,24 +67,24 @@ class ATGEN(nn.Module):
         """
         self.fitness_scores = [0.0] * len(self.population)
 
-        for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=85)):
+        for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100)):
             self.fitness_scores[i] = self.fitness_fn(network)
         
         # args = [(i, network, self.fitness_fn) for i, network in enumerate(self.population)]
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for index, fitness_score in tqdm(pool.imap_unordered(evaluate_fitness_single, args), total=len(args), desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=85):
+        #     for index, fitness_score in tqdm(pool.imap_unordered(evaluate_fitness_single, args), total=len(args), desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100):
         #         self.fitness_scores[index] = fitness_score
 
     def evaluate_learn(self):
         """
         """
-        for genome in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=85):
+        for genome in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
             self.backprob_fn(genome)
 
         # args = [(genome, self.learn_fn) for genome in self.population]
 
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=85):
+        #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=100):
         #         pass
 
     def select_parents(self) -> Tuple[ATNetwork, ATNetwork]:
@@ -133,7 +133,7 @@ class ATGEN(nn.Module):
 
         # Initialize the child network
         activation = child1.default_activation if random.random() > 0.5 else child2.default_activation
-        child = ATNetwork(size, activation, backprob_phase=child1.backprob_phase).to(device=child1.layers[0].weight.device)
+        child = ATNetwork(*size, activation=activation, backprob_phase=child1.backprob_phase).to(device=child1.layers[0].weight.device)
 
         for layer_idx, layer_size in enumerate(size[1:]):
             if layer_idx < min(len(child1.layers), len(child2.layers)):
@@ -233,7 +233,7 @@ class ATGEN(nn.Module):
         self.population = sorted_population[:self.population_size//2]  # Select top 50%
         
         new_population: List[ATNetwork] = []
-        for _ in tqdm(range(self.population_size//2), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=85):
+        for _ in tqdm(range(self.population_size//2), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
             parent1, parent2 = self.select_parents()
             child = self.crossover(parent1, parent2)
             self.mutate(child)
@@ -326,8 +326,8 @@ def refine_genome(args):
     
 if __name__ == "__main__":
     # Create parent networks with specified architectures
-    parent1 = ATNetwork([10, 2, 5, 1])
-    parent2 = ATNetwork([10, 2, 4, 3, 1])
+    parent1 = ATNetwork(10, 2, 5, 1)
+    parent2 = ATNetwork(10, 2, 4, 3, 1)
     
     # Initialize the ATGEN instance
     ga = ATGEN(population_size=10, layers=[8, 1, 4])
