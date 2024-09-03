@@ -199,7 +199,7 @@ class ATNetwork(nn.Module):
             activation.print_layer(i)
 
         print("-" * 100)
-        print(f"{BLUE}{'Total Parameters:':<25}{RESET_COLOR}{BOLD}{total_param:<15}{RESET_COLOR}")
+        print(f"{BLUE}{'Total Parameters:':<25}{RESET_COLOR}{BOLD}{total_param:,}{RESET_COLOR}")
 
 
 if __name__ == "__main__":
@@ -274,12 +274,16 @@ if __name__ == "__main__":
         ActiSwitch(nn.ReLU),
         MaxPool2D(),
         Flatten(),
-        LazyLinear(100),
+        Linear(3136, 100),
         ActiSwitch(nn.ReLU),
-        LazyLinear(1),
+        Linear(100, 1),
         input_size=(28, 28)
     )
     model.summary()
+
+    x = torch.randn(64, 3, 28, 28)
+    y = model(x)
+    print(y.shape)
 
 
 

@@ -8,6 +8,6 @@ add conv2d support to the algorithm {cm:2024-09-02}
 add kernel change to the conv layer {cm:2024-09-02}
 match conv with fully connected layer {cm:2024-09-02}
 handle crossover with CNN, split at maxpool and flatten
-check the fitness function accuracy
 make species version of algorithm
+check the fitness function accuracy
 parallelism fitness and training functions
