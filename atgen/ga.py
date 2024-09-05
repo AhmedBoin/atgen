@@ -5,6 +5,7 @@ from torch import nn
 from tqdm import tqdm
 import multiprocessing
 
+import inspect
 import copy
 import random
 from typing import List, Tuple
@@ -23,9 +24,9 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 class ATGEN(nn.Module):
     memory: ReplayBuffer = None
     def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU, last_activation=None, bias=True, 
-                 weight_mutation_rate=0.8, perturbation_rate=0.9, layer_mutation_rate=0.2, network_mutation_rate=0.01, 
-                 activation_mutation_rate=0.001, threshold=0.01, activation_dict: List[nn.Module]=None, 
-                 buffer_size = int(1e5), batch_size: int = 64, backprob_phase=False, experiences_phase=False, device="cpu"):
+                 crossover_rate = 0.8, weight_mutation_rate=0.01, perturbation_rate=0.9, layer_mutation_rate=0.2, 
+                 network_mutation_rate=0.01, activation_mutation_rate=0.001, threshold=0.01, activation_dict: List[nn.Module]=None, 
+                 buffer_size = int(1e5), batch_size: int = 64, device="cpu"):
         """
         Initialize the Genetic Algorithm for evolving neural networks.
 
@@ -40,6 +41,7 @@ class ATGEN(nn.Module):
             threshold (float): Threshold for pruning neurons with low weights.
         """
         self.population_size = population_size
+        self.crossover_rate = int((1-crossover_rate)*population_size)
         self.perturbation_rate = perturbation_rate
         self.weight_mutation_rate = weight_mutation_rate
         self.layer_mutation_rate = layer_mutation_rate
@@ -50,11 +52,9 @@ class ATGEN(nn.Module):
         # network parameters
         self.activation_dict = activation_functions if activation_dict is None else activation_dict
         ATGEN.memory = ReplayBuffer(layers[0], buffer_size, batch_size, device)
-        self.backprob_phase = backprob_phase
-        self.experiences_phase = experiences_phase
         
         # Initialize the population
-        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias, backprob_phase=backprob_phase).to(device) for _ in range(population_size)]
+        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias).to(device) for _ in range(population_size)]
         self.fitness_scores = [0.0] * population_size
         self.selection_probs = self.fitness_scores
         self.best_fitness = float("-inf")
@@ -82,7 +82,6 @@ class ATGEN(nn.Module):
             self.backprob_fn(genome)
 
         # args = [(genome, self.learn_fn) for genome in self.population]
-
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=100):
         #         pass
@@ -102,75 +101,75 @@ class ATGEN(nn.Module):
     @torch.no_grad()
     def crossover(self, parent1: ATNetwork, parent2: ATNetwork) -> ATNetwork:
         """
-        Perform a more vectorized crossover between two parent networks to produce a child network.
+        Perform a more vectorized crossover between two parent networks to produce a offspring network.
         
         Args:
             parent1 (ATNetwork): The first parent network.
             parent2 (ATNetwork): The second parent network.
         
         Returns:
-            ATNetwork: A new child network created from crossover.
+            ATNetwork: A new offspring network created from crossover.
         """
-        child1 = copy.deepcopy(parent1)
-        child2 = copy.deepcopy(parent2)
+        parent1 = copy.deepcopy(parent1)
+        parent2 = copy.deepcopy(parent2)
         
-        size1 = child1.genome_type()
-        size2 = child2.genome_type()
+        size1 = parent1.genome_type()
+        size2 = parent2.genome_type()
         
         # Evolve layers to match neuron counts for crossover
         for i, (i1, i2) in enumerate(zip(size1, size2)):
             if i1 < i2:
                 for _ in range(i2 - i1):
-                    child1.evolve_layer(i)
+                    parent1.evolve_layer(i)
             elif i2 < i1:
                 for _ in range(i1 - i2):
-                    child2.evolve_layer(i)
+                    parent2.evolve_layer(i)
 
-        # Determine final child layer sizes
-        size1 = child1.genome_type()
-        size2 = child2.genome_type()
-        size = [child1.layers[0].in_features] + (size1 if len(size1) > len(size2) else size2)
+        # Determine final offspring layer sizes
+        size1 = parent1.genome_type()
+        size2 = parent2.genome_type()
+        size = [parent1.layers[0].in_features] + (size1 if len(size1) > len(size2) else size2)
 
-        # Initialize the child network
-        activation = child1.default_activation if random.random() > 0.5 else child2.default_activation
-        child = ATNetwork(*size, activation=activation, backprob_phase=child1.backprob_phase).to(device=child1.layers[0].weight.device)
+        # Initialize the offspring network
+        activation = parent1.default_activation if random.random() > 0.5 else parent2.default_activation
+        offspring = ATNetwork(*size, activation=activation).to(device=parent1.layers[0].weight.device)
 
         for layer_idx, layer_size in enumerate(size[1:]):
-            if layer_idx < min(len(child1.layers), len(child2.layers)):
-                weight1 = child1.layers[layer_idx].weight
-                weight2 = child2.layers[layer_idx].weight
-                bias1 = child1.layers[layer_idx].bias if child1.layers[layer_idx].bias is not None else None
-                bias2 = child2.layers[layer_idx].bias if child2.layers[layer_idx].bias is not None else None
+            if layer_idx < min(len(parent1.layers), len(parent2.layers)):
+                weight1 = parent1.layers[layer_idx].weight
+                weight2 = parent2.layers[layer_idx].weight
+                bias1 = parent1.layers[layer_idx].bias if parent1.layers[layer_idx].bias is not None else None
+                bias2 = parent2.layers[layer_idx].bias if parent2.layers[layer_idx].bias is not None else None
 
                 # Apply random mask to weights and biases for crossover
                 mask = torch.rand(layer_size, device=weight1.device) < 0.5
-                child_layer_weight = torch.where(mask.unsqueeze(1).expand_as(weight1), weight1, weight2)
+                offspring_layer_weight = torch.where(mask.unsqueeze(1).expand_as(weight1), weight1, weight2)
                     
                 if bias1 is not None and bias2 is not None:
-                    child_layer_bias = torch.where(mask, bias1, bias2)
+                    offspring_layer_bias = torch.where(mask, bias1, bias2)
                 else:
-                    child_layer_bias = bias1 if bias1 is not None else bias2
+                    offspring_layer_bias = bias1 if bias1 is not None else bias2
 
-                child.layers[layer_idx].weight.data.copy_(child_layer_weight)
-                if child_layer_bias is not None:
-                    child.layers[layer_idx].bias.data.copy_(child_layer_bias)
+                offspring.layers[layer_idx].weight.data.copy_(offspring_layer_weight)
+                if offspring_layer_bias is not None:
+                    offspring.layers[layer_idx].bias.data.copy_(offspring_layer_bias)
 
                 # Crossover activation function
-                if layer_idx == len(child1.activation) - 1:
-                    child.activation[layer_idx] = child2.activation[layer_idx]
-                elif layer_idx == len(child2.activation) - 1:
-                    child.activation[layer_idx] = child1.activation[layer_idx]
+                if layer_idx == len(parent1.activation) - 1:
+                    offspring.activation[layer_idx] = parent2.activation[layer_idx]
+                elif layer_idx == len(parent2.activation) - 1:
+                    offspring.activation[layer_idx] = parent1.activation[layer_idx]
                 else:
-                    child.activation[layer_idx] = child1.activation[layer_idx] if random.random() < 0.5 else child2.activation[layer_idx]
+                    offspring.activation[layer_idx] = parent1.activation[layer_idx] if random.random() < 0.5 else parent2.activation[layer_idx]
                 
-            elif layer_idx < len(child1.layers):
-                child.layers[layer_idx] = child1.layers[layer_idx]
-                child.activation[layer_idx] = child1.activation[layer_idx]
-            elif layer_idx < len(child2.layers):
-                child.layers[layer_idx] = child2.layers[layer_idx]
-                child.activation[layer_idx] = child2.activation[layer_idx]
+            elif layer_idx < len(parent1.layers):
+                offspring.layers[layer_idx] = parent1.layers[layer_idx]
+                offspring.activation[layer_idx] = parent1.activation[layer_idx]
+            elif layer_idx < len(parent2.layers):
+                offspring.layers[layer_idx] = parent2.layers[layer_idx]
+                offspring.activation[layer_idx] = parent2.activation[layer_idx]
 
-        return child
+        return offspring
 
     @torch.no_grad()
     def mutate(self, network: ATNetwork):
@@ -201,7 +200,7 @@ class ATGEN(nn.Module):
         network.prune(threshold=self.threshold)
 
                 
-    def run_generation(self) -> float:
+    def run_generation(self, metrics: int=0) -> float:
         """
         Run a single generation of the genetic algorithm, including evaluation, selection, crossover, mutation, and pruning.
         
@@ -215,40 +214,41 @@ class ATGEN(nn.Module):
         max_fitness = max(self.fitness_scores)
         min_fitness = min(self.fitness_scores)
         mean_fitness = numpy.mean(self.fitness_scores)
-        color = GREEN if max_fitness > self.best_fitness else GRAY if max_fitness > self.last_fitness else RED
-        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ max_fitness }{RESET_COLOR}"
-        self.last_fitness = max_fitness 
-        if max_fitness > self.best_fitness: 
-            self.best_fitness = max_fitness 
+        all_fitness = [max_fitness, mean_fitness, mean_fitness]
+        color = GREEN if all_fitness[metrics] > self.best_fitness else GRAY if all_fitness[metrics] > self.last_fitness else RED
+        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ all_fitness[metrics] }{RESET_COLOR}"
+        self.last_fitness = all_fitness[metrics] 
+        if all_fitness[metrics] > self.best_fitness: 
+            self.best_fitness = all_fitness[metrics] 
             self.memory.clear()
 
         # selection of parents
-        fits = sorted([fit for fit in self.fitness_scores], reverse=True)[:self.population_size//2]
+        fits = sorted([fit for fit in self.fitness_scores], reverse=True)[:self.crossover_rate]
         min_fit = min(fits)
         fits = [fit-min_fit for fit in fits] # make all positive numbers
         total_fitness = sum(fits)
         self.selection_probs = [score / total_fitness for score in fits] # convert to probabilities
         
         sorted_population = [ind for _, ind in sorted(zip(self.fitness_scores, self.population), key=lambda x: x[0], reverse=True)]
-        self.population = sorted_population[:self.population_size//2]  # Select top 50%
+        self.population = sorted_population[:self.crossover_rate]  # Select top 50%
         
         new_population: List[ATNetwork] = []
-        for _ in tqdm(range(self.population_size//2), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
+        for _ in tqdm(range(self.population_size-self.crossover_rate), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
             parent1, parent2 = self.select_parents()
-            child = self.crossover(parent1, parent2)
-            self.mutate(child)
-            new_population.append(child)
+            offspring = self.crossover(parent1, parent2)
+            self.mutate(offspring)
+            new_population.append(offspring)
         self.population.extend(new_population)
         print(print_current_best)
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
         self.population[0].summary()
 
-        # use best genome to make experiences
-        if self.experiences_phase:
-            self.experiences_fn(self.population[0]) 
+        # use best genome to create experiences
+        if self.is_overridden("experiences_fn"):
+            self.experiences_fn(self.population[0])
 
-        # smooth the generation networks a little based back propagation
-        if self.backprob_phase:
+        # smooth the generation networks a little back propagation based method
+        if self.is_overridden("backprob_fn"):
             self.evaluate_learn()
 
         print_stats_table(self.best_fitness, max_fitness, mean_fitness, min_fitness, self.population_size)
@@ -260,7 +260,7 @@ class ATGEN(nn.Module):
         if generation is not None:
                 for i in range(generation):
                     print(f"\n--- {BLUE}Generation {i+1}{RESET_COLOR} ---")
-                    last_fitness = self.run_generation()[metrics]
+                    last_fitness = self.run_generation(metrics)[metrics]
                     if fitness is not None:
                         if last_fitness >= fitness:
                             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
@@ -271,7 +271,7 @@ class ATGEN(nn.Module):
             while fitness > last_fitness:
                 generation += 1
                 print(f"\n--- {BLUE}Generation {generation}{RESET_COLOR} ---")
-                last_fitness = self.run_generation()[metrics]
+                last_fitness = self.run_generation(metrics)[metrics]
             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
             
         else:
@@ -280,6 +280,7 @@ class ATGEN(nn.Module):
         if save_name is not None:
             self.population[0].save_network(save_name)
 
+        # TODO: plot or return
         if plot:
             "plot using matplotlib"
         else:
@@ -293,6 +294,15 @@ class ATGEN(nn.Module):
     
     def experiences_fn(self, genome):
         raise NotImplementedError("implement store_experiences method")
+
+    def is_overridden(self, method_name):
+        if getattr(self, method_name, None) is None:
+            return False
+        
+        for cls in inspect.getmro(self.__class__):
+            if method_name in cls.__dict__:
+                return cls != ATGEN
+        return False
 
     def save_population(self, file_name="population.pkl"):
         with open(f'{file_name}', 'wb') as file:
@@ -333,6 +343,6 @@ if __name__ == "__main__":
     ga = ATGEN(population_size=10, layers=[8, 1, 4])
     
     # Perform crossover
-    child = ga.crossover(parent1, parent2)
-    child.summary()
+    offspring = ga.crossover(parent1, parent2)
+    offspring.summary()
 

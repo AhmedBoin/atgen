@@ -23,7 +23,7 @@ class ATNetwork(nn.Module):
     This class provides methods to dynamically change the network architecture, 
     such as adding or removing layers, evolving weights, and modifying activation functions.
     """
-    def __init__(self, *layers, activation=nn.ReLU, last_activation=None, bias=True, backprob_phase=True, input_size=None):
+    def __init__(self, *layers, activation=nn.ReLU, last_activation=None, bias=True, input_size=None):
         """
         Initialize the ATNetwork.
 
@@ -38,7 +38,7 @@ class ATNetwork(nn.Module):
         if isinstance(layers[0], int):
             self.layers = nn.ModuleList([Linear(layers[idx], layers[idx + 1], bias) for idx in range(len(layers) - 1)])
             self.activation = nn.ModuleList([
-                *[ActiSwitch(activation, backprob_phase) for _ in range(len(layers) - 2)], 
+                *[ActiSwitch(activation) for _ in range(len(layers) - 2)], 
                 Pass() if last_activation is None else last_activation
             ])
         else:
@@ -69,7 +69,6 @@ class ATNetwork(nn.Module):
                     elif isinstance(layer, LazyLinear):
                         input_size = layer.custom_init(input_size)
 
-        self.backprob_phase = backprob_phase
         self.default_activation = activation
 
 
@@ -91,7 +90,7 @@ class ATNetwork(nn.Module):
         """
         idx = random.randint(0, len(self.layers)-1) if idx is None else idx
         self.layers.insert(idx, Linear.init_identity_layer(self.layers[idx].in_features, True if self.layers[idx].bias is not None else False))
-        self.activation.insert(idx, ActiSwitch(self.default_activation, self.backprob_phase))
+        self.activation.insert(idx, ActiSwitch(self.default_activation, True))
 
     def evolve_layer(self, idx=None):
         """
