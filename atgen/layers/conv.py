@@ -15,6 +15,7 @@ class Conv2D(nn.Module):
         self.stride = stride
         self.padding = padding
         self.norm = norm  # Flag to indicate whether to apply normalization
+        self.input_size = None
 
         self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels, kernel_size, kernel_size))
         if bias:

@@ -6,10 +6,10 @@ from typing import List
 import random
 from inspect import isfunction
 
-from utils import BLUE, BOLD, RESET_COLOR
-from layers.activations import ActiSwitch, Pass
-from layers.linear import Linear, Flatten, LazyLinear
-from layers.conv import Conv2D, MaxPool2D, LazyConv2D
+from .utils import BLUE, BOLD, RESET_COLOR
+from .layers.activations import ActiSwitch, Pass
+from .layers.linear import Linear, Flatten, LazyLinear
+from .layers.conv import Conv2D, MaxPool2D, LazyConv2D
 
 from math import fabs as abs
 
@@ -56,18 +56,7 @@ class ATNetwork(nn.Module):
                     self.activation.append(Pass())
 
             if input_size is not None:
-                for layer in self.layers:
-                    if isinstance(layer, Conv2D):
-                        input_size, channels = layer.store_sizes(input_size)
-                    elif isinstance(layer, MaxPool2D):
-                        input_size, channels = layer.store_sizes(input_size, channels)
-                    elif isinstance(layer, LazyConv2D):
-                        layer.custom_init(channels)
-                        input_size, channels = layer.store_sizes(input_size)
-                    elif isinstance(layer, Flatten):
-                        input_size, channels = layer.store_sizes(input_size, channels)
-                    elif isinstance(layer, LazyLinear):
-                        input_size = layer.custom_init(input_size)
+                self.store_sizes(input_size)
 
         self.default_activation = activation
 
@@ -76,6 +65,20 @@ class ATNetwork(nn.Module):
         for i in range(len(self.layers)):
             x = self.activation[i](self.layers[i](x))
         return x
+    
+    def store_sizes(self, input_size):
+        for layer in self.layers:
+            if isinstance(layer, Conv2D):
+                input_size, channels = layer.store_sizes(input_size)
+            elif isinstance(layer, MaxPool2D):
+                input_size, channels = layer.store_sizes(input_size, channels)
+            elif isinstance(layer, LazyConv2D):
+                layer.custom_init(channels)
+                input_size, channels = layer.store_sizes(input_size)
+            elif isinstance(layer, Flatten):
+                input_size, channels = layer.store_sizes(input_size, channels)
+            elif isinstance(layer, LazyLinear):
+                input_size = layer.custom_init(input_size)
     
 
     def evolve_network(self, idx=None):
