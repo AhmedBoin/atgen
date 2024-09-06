@@ -9,5 +9,5 @@ add kernel change to the conv layer {cm:2024-09-02}
 match conv with fully connected layer {cm:2024-09-02}
 handle crossover with CNN, split at maxpool and flatten
 make species version of algorithm
-check the fitness function accuracy
+check the fitness function accuracy {cm:2024-09-06}
 parallelism fitness and training functions
