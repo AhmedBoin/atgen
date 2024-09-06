@@ -58,6 +58,7 @@ class ATNetwork(nn.Module):
             if input_size is not None:
                 self.store_sizes(input_size)
 
+        self.input_size = input_size
         self.default_activation = activation
 
 
@@ -66,7 +67,10 @@ class ATNetwork(nn.Module):
             x = self.activation[i](self.layers[i](x))
         return x
     
-    def store_sizes(self, input_size):
+
+    def store_sizes(self, input_size=None):
+        input_size = input_size if input_size is not None else self.input_size
+
         for layer in self.layers:
             if isinstance(layer, Conv2D):
                 input_size, channels = layer.store_sizes(input_size)
@@ -94,6 +98,8 @@ class ATNetwork(nn.Module):
         idx = random.randint(0, len(self.layers)-1) if idx is None else idx
         self.layers.insert(idx, Linear.init_identity_layer(self.layers[idx].in_features, True if self.layers[idx].bias is not None else False))
         self.activation.insert(idx, ActiSwitch(self.default_activation, True))
+        if self.input_size is not None:
+            self.store_sizes()
 
     def evolve_layer(self, idx=None):
         """
@@ -112,7 +118,10 @@ class ATNetwork(nn.Module):
                 self.layers[idx + 1].add_weight()
         elif idx is not None: # handle if only 1 output layer in crossover
             self.layers[idx].add_neuron()
+        if self.input_size is not None:
+            self.store_sizes()
         # self.summary()
+
 
     @torch.no_grad()
     def evolve_weight(self, mutation_rate, perturbation_rate):
@@ -130,6 +139,8 @@ class ATNetwork(nn.Module):
             if random.random() < mutation_rate:
                 noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
                 param.add_(noise)
+        if self.input_size is not None:
+            self.store_sizes()
         # self.summary()
 
 
@@ -149,7 +160,10 @@ class ATNetwork(nn.Module):
             idx = random.randint(0, len(self.layers)-2) if idx is None else idx
             activation = random.choice(activation_dict)
             self.activation[idx].change_activation(activation)
-            # self.summary()
+        if self.input_size is not None:
+            self.store_sizes()
+        # self.summary()
+
 
     def prune(self, threshold: float = 0.01):
         """
@@ -159,7 +173,7 @@ class ATNetwork(nn.Module):
             threshold (float): The threshold below which neurons will be pruned.
         """
         for i, layer in enumerate(self.layers[:-1]):
-            if isinstance(layer, Linear) and layer.out_features > 1:
+            if (isinstance(layer, Linear) or isinstance(layer, LazyLinear)) and layer.out_features > 1:
                 try:
                     # Identify neurons to prune
                     neurons_to_prune = []
@@ -173,19 +187,25 @@ class ATNetwork(nn.Module):
                         self.layers[i + 1].remove_weight(neuron_idx)
                 except:
                     pass
+        if self.input_size is not None:
+            self.store_sizes()
+
 
     def genome_type(self) -> List[int]:
         return [layer.out_features for layer in self.layers]
-    
+
+
     def save_network(self, file_name="ATNetwork.pth"):
         with open(f'{file_name}', 'wb') as file:
             pickle.dump(self, file)
+
 
     @classmethod
     def load_network(cls, file_name="ATNetwork.pth") -> "ATNetwork":
         with open(f'{file_name}', 'rb') as file:
             network: ATNetwork = pickle.load(file)
         return network
+
 
     @torch.no_grad()
     def summary(self):
@@ -224,6 +244,8 @@ if __name__ == "__main__":
                 ActiSwitch(),
                 Pass()
             ])
+
+            self.input_size = None
             self.backprob_phase = True
             self.default_activation = nn.ReLU
 

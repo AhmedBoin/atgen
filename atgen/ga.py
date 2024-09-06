@@ -11,9 +11,9 @@ import random
 from typing import List, Tuple
 import pickle
 
-from network import ATNetwork
-from memory import ReplayBuffer
-from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
+from .network import ATNetwork
+from .memory import ReplayBuffer
+from .utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
 
 
 import warnings
