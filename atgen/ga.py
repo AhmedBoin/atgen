@@ -113,8 +113,8 @@ class ATGEN(nn.Module):
         parent1 = copy.deepcopy(parent1)
         parent2 = copy.deepcopy(parent2)
         
-        size1 = parent1.genome_type()
-        size2 = parent2.genome_type()
+        size1 = parent1.genome_type()[1]
+        size2 = parent2.genome_type()[1]
         
         # Evolve layers to match neuron counts for crossover
         for i, (i1, i2) in enumerate(zip(size1, size2)):
@@ -126,8 +126,8 @@ class ATGEN(nn.Module):
                     parent2.evolve_layer(i)
 
         # Determine final offspring layer sizes
-        size1 = parent1.genome_type()
-        size2 = parent2.genome_type()
+        size1 = parent1.genome_type()[1]
+        size2 = parent2.genome_type()[1]
         size = [parent1.layers[0].in_features] + (size1 if len(size1) > len(size2) else size2)
 
         # Initialize the offspring network

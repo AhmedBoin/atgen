@@ -192,7 +192,14 @@ class ATNetwork(nn.Module):
 
 
     def genome_type(self) -> List[int]:
-        return [layer.out_features for layer in self.layers]
+        genome = [[], []]
+        for i, layer in enumerate(self.layers):
+            if isinstance(layer, Linear) or isinstance(layer, LazyLinear):
+                genome[1].append(layer.out_features)
+            elif isinstance(layer, Conv2D) or isinstance(layer, LazyConv2D):
+                genome[0].append(layer.out_channels)
+
+        return genome
 
 
     def save_network(self, file_name="ATNetwork.pth"):
