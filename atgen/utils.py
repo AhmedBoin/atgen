@@ -1,6 +1,6 @@
 
 import torch.nn as nn
-from .layers import Linear, Conv2D, MaxPool2D, Flatten
+from .layers import Linear, Conv2D, MaxPool2D, Flatten, LazyLinear
 
 
 activation_functions = [
@@ -49,7 +49,7 @@ class GenomeType:
         Parse the layers to extract their type and critical information.
         """
         for i, layer in enumerate(layers):
-            if isinstance(layer, Linear):
+            if isinstance(layer, Linear) or isinstance(layer, LazyLinear):
                 self.genome.append(('Linear', layer.in_features, layer.out_features))
             elif isinstance(layer, Conv2D):
                 self.genome.append(('Conv2D', layer.in_channels, layer.out_channels, layer.kernel_size))
@@ -87,7 +87,7 @@ class GenomeType:
         sections = []
         start = 0
         for index in self.split_indices:
-            sections.append(self.genome[start:index+1])
+            sections.append(self.genome[start:index])
             start = index + 1
         sections.append(self.genome[start:])  # Add the remaining part
         return sections
