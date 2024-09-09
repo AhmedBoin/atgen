@@ -1,7 +1,6 @@
 
 import torch.nn as nn
 
-
 activation_functions = [
     nn.ReLU,
     nn.Sigmoid,
@@ -33,16 +32,10 @@ RESET_COLOR = "\033[0m"
 
 from tabulate import tabulate
 
-def print_stats_table(best, maximum, mean, minimum, population):
-    headers = ["Best", "Maximum", "Mean", "Minimum", "Population"]
-    table = [[best, maximum, mean, minimum, population]]
+def print_stats_table(best, metrics, maximum, mean, minimum, population, species=1):
+    met = ["Maximum", "Mean", "Minimum"]
+    headers = ["Best", "Metrics","Maximum", "Mean", "Minimum", "Population", "Species"]
+    table = [[best, met[metrics], maximum, mean, minimum, population, species]]
     print(tabulate(table, headers, tablefmt="fancy_grid"))
 
 
-if __name__ == "__main__":
-    # Example usage
-    best_value = 0.85
-    mean_value = 0.75
-    min_value = 0.65
-
-    print_stats_table(best_value, mean_value, min_value)

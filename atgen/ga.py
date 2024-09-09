@@ -4,6 +4,7 @@ from torch import nn
 
 from tqdm import tqdm
 import multiprocessing
+import matplotlib.pyplot as plt
 
 import inspect
 import copy
@@ -23,7 +24,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class ATGEN(nn.Module):
     memory: ReplayBuffer = None
-    def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU, last_activation=None, bias=True, 
+    def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU(), last_activation=None, bias=True, 
                  crossover_rate = 0.8, weight_mutation_rate=0.01, perturbation_rate=0.9, layer_mutation_rate=0.2, 
                  network_mutation_rate=0.01, activation_mutation_rate=0.001, threshold=0.01, activation_dict: List[nn.Module]=None, 
                  buffer_size = int(1e5), batch_size: int = 64, device="cpu"):
@@ -113,8 +114,8 @@ class ATGEN(nn.Module):
         parent1 = copy.deepcopy(parent1)
         parent2 = copy.deepcopy(parent2)
         
-        size1 = parent1.genome_type()[1]
-        size2 = parent2.genome_type()[1]
+        size1 = parent1.genotype().linear_size()[1:]
+        size2 = parent2.genotype().linear_size()[1:]
         
         # Evolve layers to match neuron counts for crossover
         for i, (i1, i2) in enumerate(zip(size1, size2)):
@@ -126,8 +127,8 @@ class ATGEN(nn.Module):
                     parent2.evolve_layer(i)
 
         # Determine final offspring layer sizes
-        size1 = parent1.genome_type()[1]
-        size2 = parent2.genome_type()[1]
+        size1 = parent1.genotype().linear_size()[1:]
+        size2 = parent2.genotype().linear_size()[1:]
         size = [parent1.layers[0].in_features] + (size1 if len(size1) > len(size2) else size2)
 
         # Initialize the offspring network
@@ -251,16 +252,21 @@ class ATGEN(nn.Module):
         if self.is_overridden("backprob_fn"):
             self.evaluate_learn()
 
-        print_stats_table(self.best_fitness, max_fitness, mean_fitness, min_fitness, self.population_size)
+        print_stats_table(self.best_fitness, metrics, max_fitness, mean_fitness, min_fitness, self.population_size)
         self.save_population()
         return max_fitness, mean_fitness, min_fitness
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
         last_fitness = -float("inf")
+        maximum, mean, minimum = [], [], []
         if generation is not None:
                 for i in range(generation):
                     print(f"\n--- {BLUE}Generation {i+1}{RESET_COLOR} ---")
-                    last_fitness = self.run_generation(metrics)[metrics]
+                    results = self.run_generation(metrics)
+                    maximum.append(results[0])
+                    mean.append(results[1])
+                    minimum.append(results[2])
+                    last_fitness = results[metrics]
                     if fitness is not None:
                         if last_fitness >= fitness:
                             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
@@ -271,7 +277,11 @@ class ATGEN(nn.Module):
             while fitness > last_fitness:
                 generation += 1
                 print(f"\n--- {BLUE}Generation {generation}{RESET_COLOR} ---")
-                last_fitness = self.run_generation(metrics)[metrics]
+                results = self.run_generation(metrics)
+                maximum.append(results[0])
+                mean.append(results[1])
+                minimum.append(results[2])
+                last_fitness = results[metrics]
             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
             
         else:
@@ -282,9 +292,18 @@ class ATGEN(nn.Module):
 
         # TODO: plot or return
         if plot:
-            "plot using matplotlib"
+            plt.plot(range(len(mean)), mean, label='Mean Fitness')
+            plt.fill_between(range(len(mean)), minimum, maximum, alpha=0.2, label='Confidence Interval')
+
+            # Set labels and title
+            plt.xlabel('Generation Number')
+            plt.ylabel('Fitness')
+            plt.title('Training Progress with Confidence Interval')
+            plt.legend(loc='upper right')
+            plt.grid(True)
+            plt.show()
         else:
-            return "max, mean, min"
+            return maximum, mean, minimum
     
     def fitness_fn(self, genome):
         raise NotImplementedError("implement fitness_fn method")

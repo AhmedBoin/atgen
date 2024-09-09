@@ -63,6 +63,7 @@ class Linear(nn.Module):
         self.out_features = out_features
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         self.bias = nn.Parameter(torch.Tensor(out_features)) if bias else None
+        self.norm_type = norm_type
         
         self.reset_parameters()
 

@@ -12,6 +12,9 @@ class Pass(nn.Module):
     def print_layer(self, i: int):
         print(f"{self.__class__.__name__:<15}")
 
+    # @property
+    # def params_count(self):
+    #     return 0
 
 
 class GradientControl(torch.autograd.Function):
@@ -79,11 +82,11 @@ class ActiSwitch(nn.Module):
         change_activation(activation: callable) -> None:
             Updates the activation function used for the non-linear transformation.
     """
-    def __init__(self, activation=nn.ReLU, linear_start=False) -> "ActiSwitch":
+    def __init__(self, activation=nn.ReLU(), linear_start=False) -> "ActiSwitch":
         super(ActiSwitch, self).__init__()
         self.linear_weight = nn.Parameter(torch.tensor(1.0 if linear_start else 0.0))
         self.activation_weight = nn.Parameter(torch.tensor(0.0 if linear_start else 1.0))
-        self.activation = activation if inspect.isfunction(activation) else activation()
+        self.activation = activation
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear_weight * x + self.activation_weight * self.activation(x)
@@ -94,9 +97,13 @@ class ActiSwitch(nn.Module):
     def print_layer(self, i: int):
         print(f"{self.__class__.__name__}({self.activation.__name__ if inspect.isfunction(self.activation) else self.activation.__class__.__name__}, {f'{100*(abs(self.activation_weight.item())/(abs(self.linear_weight.item())+abs(self.activation_weight.item()))):.2f}':<6}%)")
 
+    # @property
+    # def params_count(self):
+    #     return 0
+
 
 if __name__ == "__main__":
-    linear_pass_relu = ActiSwitch(nn.Tanh)
+    linear_pass_relu = ActiSwitch(nn.Tanh())
     x = torch.randn(5, 4, 3, 2)
     output: torch.Tensor = linear_pass_relu(x)
 

@@ -10,6 +10,7 @@ from .utils import BLUE, BOLD, RESET_COLOR
 from .layers.activations import ActiSwitch, Pass
 from .layers.linear import Linear, Flatten, LazyLinear
 from .layers.conv import Conv2D, MaxPool2D, LazyConv2D
+from .dna import DNA
 
 from math import fabs as abs
 
@@ -23,7 +24,7 @@ class ATNetwork(nn.Module):
     This class provides methods to dynamically change the network architecture, 
     such as adding or removing layers, evolving weights, and modifying activation functions.
     """
-    def __init__(self, *layers, activation=nn.ReLU, last_activation=None, bias=True, input_size=None):
+    def __init__(self, *layers, activation=nn.ReLU(), last_activation=None, bias=True, input_size=None):
         """
         Initialize the ATNetwork.
 
@@ -45,7 +46,7 @@ class ATNetwork(nn.Module):
             self.layers = nn.ModuleList()
             self.activation = nn.ModuleList()
             for layer in layers:
-                if isinstance(layer, ActiSwitch):
+                if isinstance(layer, ActiSwitch) or isinstance(layer, Pass):
                     if len(self.activation) > 0: # if ActiSwitch is the first layer
                         self.activation.pop(-1)
                     else:
@@ -191,15 +192,24 @@ class ATNetwork(nn.Module):
             self.store_sizes()
 
 
-    def genome_type(self) -> List[int]:
-        genome = [[], []]
-        for i, layer in enumerate(self.layers):
+    def genotype(self) -> DNA:
+        genome = DNA(self.input_size)
+        for i, (layer, activation) in enumerate(zip(self.layers, self.activation)):
             if isinstance(layer, Linear) or isinstance(layer, LazyLinear):
-                genome[1].append(layer.out_features)
+                genome.append_linear((layer, activation))
             elif isinstance(layer, Conv2D) or isinstance(layer, LazyConv2D):
-                genome[0].append(layer.out_channels)
-
+                genome.append_conv((layer, activation))
+            elif isinstance(layer, MaxPool2D):
+                genome.append_maxpool((i, layer))
+            elif isinstance(layer, Flatten):
+                genome.flatten = layer
+            
         return genome
+    
+
+    @classmethod
+    def phenotype(cls, genome: DNA) -> "ATNetwork":
+        return cls(*genome.reconstruct(), input_size=genome.input_size)
 
 
     def save_network(self, file_name="ATNetwork.pth"):
@@ -231,6 +241,8 @@ class ATNetwork(nn.Module):
         print(f"{BLUE}{'Total Parameters:':<25}{RESET_COLOR}{BOLD}{total_param:,}{RESET_COLOR}")
 
 
+
+
 if __name__ == "__main__":
     # helper loss function
     def loss(x1:torch.Tensor, x2: torch.Tensor):
@@ -254,7 +266,7 @@ if __name__ == "__main__":
 
             self.input_size = None
             self.backprob_phase = True
-            self.default_activation = nn.ReLU
+            self.default_activation = nn.ReLU()
 
     model = CustomNetwork()
     model.summary()
@@ -288,25 +300,25 @@ if __name__ == "__main__":
         ActiSwitch(F.relu),
         Linear(5, 3),
         Linear(3, 3),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         Linear(3, 1),
     )
     model.summary()
 
     model = ATNetwork(
         Conv2D(3, 32, kernel_size=3),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         Conv2D(32, 32, kernel_size=3),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         MaxPool2D(),
         Conv2D(32, 64, kernel_size=3),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         Conv2D(64, 64, kernel_size=3),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         MaxPool2D(),
         Flatten(),
         Linear(3136, 100),
-        ActiSwitch(nn.ReLU),
+        ActiSwitch(nn.ReLU()),
         Linear(100, 1),
         input_size=(28, 28)
     )
@@ -315,6 +327,20 @@ if __name__ == "__main__":
     x = torch.randn(64, 3, 28, 28)
     y = model(x)
     print(y.shape)
+
+    genome = model.genotype()
+    print(genome)
+
+    model = ATNetwork.phenotype(genome)
+    model.summary()
+
+    model = ATNetwork(10, 5, 3, 1)
+    genome = model.genotype()
+    model.summary()
+    print(genome)
+
+    model = ATNetwork.phenotype(genome)
+    model.summary()
 
 
 
