@@ -110,9 +110,17 @@ class DNA:
                     if random.random() < mutation_rate:
                         noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
                         param.add_(noise)
+                for param in layer[1].parameters():
+                    if random.random() < mutation_rate:
+                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                        param.add_(noise)
         if self.linear:
             for layer in self.linear:
                 for param in layer[0].parameters():
+                    if random.random() < mutation_rate:
+                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                        param.add_(noise)
+                for param in layer[1].parameters():
                     if random.random() < mutation_rate:
                         noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
                         param.add_(noise)
