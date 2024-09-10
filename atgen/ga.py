@@ -16,6 +16,7 @@ from network import ATNetwork
 from layers import Linear, Conv2D, LazyConv2D, MaxPool2D, Flatten, ActiSwitch, Pass, LazyLinear
 from dna import DNA
 from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
+from config import ATGENConfig
 
 
 import warnings
@@ -24,10 +25,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN(nn.Module):
-    def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU(), last_activation=None, bias=True, 
-                 crossover_rate = 0.8, weight_mutation_rate=0.01, perturbation_rate=0.9, add_neuron_mutation_rate=0.2, 
-                 add_filter_mutation_rate=0.0, linear_mutation_rate=0.0, conv_mutation_rate=0.0, activation_mutation_rate=0.001, 
-                 threshold=0.01, activation_dict: List[nn.Module]=None, linear_start=True, input_size=None, device="cpu"):
+    def __init__(self, population_size: int, layers: List[int], config=ATGENConfig(), device="cpu"):
         """
         Initialize the Genetic Algorithm for evolving neural networks.
 
@@ -41,24 +39,20 @@ class ATGEN(nn.Module):
             crossover_rate (float): Probability of performing crossover between two networks.
             threshold (float): Threshold for pruning neurons with low weights.
         """
-        self.to(device)
         self.population_size = population_size
-        self.crossover_rate = int((1-crossover_rate)*population_size)
-        self.weight_mutation_rate = weight_mutation_rate
-        self.perturbation_rate = perturbation_rate
-        self.add_neuron_mutation_rate = add_neuron_mutation_rate
-        self.add_filter_mutation_rate = add_filter_mutation_rate
-        self.linear_mutation_rate = linear_mutation_rate
-        self.conv_mutation_rate = conv_mutation_rate
-        self.activation_mutation_rate = activation_mutation_rate
-        self.threshold = threshold
-        
-        # network parameters
-        self.activation_dict = activation_functions if activation_dict is None else activation_dict
-        self.linear_start = linear_start
+        self.config = config
+        self.crossover_rate = int((1-self.config.crossover_rate)*population_size)
         
         # Initialize the population
-        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias, input_size=input_size).to(device) for _ in range(population_size)]
+        self.population = [
+            ATNetwork(
+                *layers, 
+                activation=self.config.default_activation, 
+                last_activation=self.config.last_activation, 
+                bias=self.config.bias, 
+                input_size=self.config.input_size
+            ).to(device) for _ in range(population_size)
+        ]
         self.fitness_scores = [0.0] * population_size
         self.selection_probs = self.fitness_scores
         self.best_fitness = float("-inf")
@@ -209,17 +203,17 @@ class ATGEN(nn.Module):
         Args:
             network (DNA): The network to mutate.
         """
-        if random.random() > self.linear_mutation_rate:
+        if random.random() < self.config.linear_mutation_rate:
             network.evolve_linear_network()
-        if random.random() > self.conv_mutation_rate:
+        if random.random() < self.config.conv_mutation_rate:
             network.evolve_conv_network()
-        if random.random() > self.add_neuron_mutation_rate:
+        if random.random() < self.config.add_neuron_mutation_rate:
             network.evolve_linear_layer()
-        if random.random() > self.add_filter_mutation_rate:
+        if random.random() < self.config.add_filter_mutation_rate:
             network.evolve_conv_layer()
-        if random.random() > self.activation_mutation_rate:
-            network.evolve_activation(self.activation_dict)
-        network.evolve_weight(self.weight_mutation_rate, self.perturbation_rate)
+        if random.random() < self.config.activation_mutation_rate:
+            network.evolve_activation(self.config.activation_dict)
+        network.evolve_weight(self.config.weight_mutation_rate, self.config.perturbation_rate)
 
                 
     def run_generation(self, metrics: int=0) -> float:

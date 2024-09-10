@@ -6,6 +6,7 @@ from torch.optim import AdamW
 from atgen.layers.activations import Pass
 from atgen.network import ATNetwork
 from atgen.ga import ATGEN
+from atgen.config import ATGENConfig
 
 import gymnasium as gym
 import warnings
@@ -16,12 +17,10 @@ env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, layers: F.List[int]):
-        super().__init__(population_size, layers, activation=torch.nn.ReLU(), last_activation=Pass(),
-                         crossover_rate = 0.5, weight_mutation_rate=0.01, perturbation_rate=0.9, add_neuron_mutation_rate=0.2, 
-                 add_filter_mutation_rate=0.5, linear_mutation_rate=0.5, conv_mutation_rate=0.5, activation_mutation_rate=0.001)
+        super().__init__(population_size, layers, ATGENConfig())
 
     def fitness_fn(self, model: ATNetwork):
-        epochs = 3
+        epochs = 2
         env = gym.make("LunarLander-v2")
         total_reward = 0
         for _ in range(epochs):
@@ -112,13 +111,13 @@ class NeuroEvolution(ATGEN):
 if __name__ == "__main__":
     ne = NeuroEvolution(1000, [8, 4])
     # ne.load_population()
-    ne.evolve(fitness=200, save_name="ATNetwork.pth", metrics=0, plot=True)
+    ne.evolve(fitness=280, save_name="ATNetwork.pth", metrics=0, plot=True)
     
     # model = ATNetwork.load_network()
-    # model = ne.population[0]
+    model = ne.population[1]
     # env = gym.make("LunarLander-v2", render_mode="human")
     while True:
-        for i, model in enumerate(ne.population[:ne.crossover_rate]):
+        # for i, model in enumerate(ne.population[:ne.crossover_rate]):
             env = gym.make("LunarLander-v2", render_mode="human")
             state, info = env.reset()
             total_reward = 0
@@ -128,8 +127,8 @@ if __name__ == "__main__":
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:
-                        # print(f"Last reward: {total_reward}")
-                        print(f"model: {i:<15}Last reward: {total_reward}")
+                        print(f"Last reward: {total_reward}")
+                        # print(f"model: {i:<15}Last reward: {total_reward}")
                         total_reward = 0
                         state, info = env.reset()
                         break
