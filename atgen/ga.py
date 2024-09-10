@@ -12,9 +12,10 @@ import random
 from typing import List, Tuple
 import pickle
 
-from .network import ATNetwork
-from .memory import ReplayBuffer
-from .utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
+from network import ATNetwork
+from layers import Linear, Conv2D, LazyConv2D, MaxPool2D, Flatten, ActiSwitch, Pass, LazyLinear
+from dna import DNA
+from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
 
 
 import warnings
@@ -23,11 +24,10 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN(nn.Module):
-    memory: ReplayBuffer = None
     def __init__(self, population_size: int, layers: List[int], activation=nn.ReLU(), last_activation=None, bias=True, 
-                 crossover_rate = 0.8, weight_mutation_rate=0.01, perturbation_rate=0.9, layer_mutation_rate=0.2, 
-                 network_mutation_rate=0.01, activation_mutation_rate=0.001, threshold=0.01, activation_dict: List[nn.Module]=None, 
-                 buffer_size = int(1e5), batch_size: int = 64, device="cpu"):
+                 crossover_rate = 0.8, weight_mutation_rate=0.01, perturbation_rate=0.9, add_neuron_mutation_rate=0.2, 
+                 add_filter_mutation_rate=0.0, linear_mutation_rate=0.0, conv_mutation_rate=0.0, activation_mutation_rate=0.001, 
+                 threshold=0.01, activation_dict: List[nn.Module]=None, linear_start=True, input_size=None, device="cpu"):
         """
         Initialize the Genetic Algorithm for evolving neural networks.
 
@@ -41,21 +41,24 @@ class ATGEN(nn.Module):
             crossover_rate (float): Probability of performing crossover between two networks.
             threshold (float): Threshold for pruning neurons with low weights.
         """
+        self.to(device)
         self.population_size = population_size
         self.crossover_rate = int((1-crossover_rate)*population_size)
-        self.perturbation_rate = perturbation_rate
         self.weight_mutation_rate = weight_mutation_rate
-        self.layer_mutation_rate = layer_mutation_rate
-        self.network_mutation_rate = network_mutation_rate
+        self.perturbation_rate = perturbation_rate
+        self.add_neuron_mutation_rate = add_neuron_mutation_rate
+        self.add_filter_mutation_rate = add_filter_mutation_rate
+        self.linear_mutation_rate = linear_mutation_rate
+        self.conv_mutation_rate = conv_mutation_rate
         self.activation_mutation_rate = activation_mutation_rate
         self.threshold = threshold
         
         # network parameters
         self.activation_dict = activation_functions if activation_dict is None else activation_dict
-        ATGEN.memory = ReplayBuffer(layers[0], buffer_size, batch_size, device)
+        self.linear_start = linear_start
         
         # Initialize the population
-        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias).to(device) for _ in range(population_size)]
+        self.population = [ATNetwork(*layers, activation=activation, last_activation=last_activation, bias=bias, input_size=input_size).to(device) for _ in range(population_size)]
         self.fitness_scores = [0.0] * population_size
         self.selection_probs = self.fitness_scores
         self.best_fitness = float("-inf")
@@ -87,118 +90,136 @@ class ATGEN(nn.Module):
         #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=100):
         #         pass
 
-    def select_parents(self) -> Tuple[ATNetwork, ATNetwork]:
+    def select_parents(self) -> Tuple[DNA, DNA]:
         """
         Select two parents from the population based on fitness scores using roulette wheel selection.
         
         Returns:
-            Tuple[ATNetwork, ATNetwork]: Two selected parent networks.
+            Tuple[DNA, DNA]: Two selected parent networks.
         """
-        parent1 = random.choices(self.population, weights=self.selection_probs, k=1)[0]
-        parent2 = random.choices(self.population, weights=self.selection_probs, k=1)[0]
+        parent1 = random.choices(self.population, weights=self.selection_probs, k=1)[0].genotype()
+        parent2 = random.choices(self.population, weights=self.selection_probs, k=1)[0].genotype()
         
         return parent1, parent2
 
     @torch.no_grad()
-    def crossover(self, parent1: ATNetwork, parent2: ATNetwork) -> ATNetwork:
+    def crossover(self, parent1: DNA, parent2: DNA) -> DNA:
         """
         Perform a more vectorized crossover between two parent networks to produce a offspring network.
         
         Args:
-            parent1 (ATNetwork): The first parent network.
-            parent2 (ATNetwork): The second parent network.
+            parent1 (DNA): The first parent network.
+            parent2 (DNA): The second parent network.
         
         Returns:
-            ATNetwork: A new offspring network created from crossover.
+            DNA: A new offspring network created from crossover.
         """
         parent1 = copy.deepcopy(parent1)
         parent2 = copy.deepcopy(parent2)
-        
-        size1 = parent1.genotype().linear_size()[1:]
-        size2 = parent2.genotype().linear_size()[1:]
+        offspring = copy.deepcopy(parent1)
+        modifier = copy.deepcopy(parent2)
         
         # Evolve layers to match neuron counts for crossover
-        for i, (i1, i2) in enumerate(zip(size1, size2)):
+        for i, (i1, i2) in enumerate(zip(parent1.conv_size(), parent2.conv_size())):
             if i1 < i2:
                 for _ in range(i2 - i1):
-                    parent1.evolve_layer(i)
+                    parent1.evolve_conv_layer(i, True)
             elif i2 < i1:
                 for _ in range(i1 - i2):
-                    parent2.evolve_layer(i)
+                    parent2.evolve_conv_layer(i, True)
+                    
+        for i, (i1, i2) in enumerate(zip(parent1.linear_size(), parent2.linear_size())):
+            if i1 < i2:
+                for _ in range(i2 - i1):
+                    parent1.evolve_linear_layer(i)
+            elif i2 < i1:
+                for _ in range(i1 - i2):
+                    parent2.evolve_linear_layer(i)
 
         # Determine final offspring layer sizes
-        size1 = parent1.genotype().linear_size()[1:]
-        size2 = parent2.genotype().linear_size()[1:]
-        size = [parent1.layers[0].in_features] + (size1 if len(size1) > len(size2) else size2)
+        if len(parent1.conv) > len(parent2.conv):
+            offspring.conv, modifier.conv = parent1.conv, parent2.conv
+        else:
+            offspring.conv, modifier.conv = parent2.conv, parent1.conv
 
-        # Initialize the offspring network
-        activation = parent1.default_activation if random.random() > 0.5 else parent2.default_activation
-        offspring = ATNetwork(*size, activation=activation).to(device=parent1.layers[0].weight.device)
+        if len(parent1.linear) > len(parent2.linear):
+            offspring.linear, modifier.linear = parent1.linear, parent2.linear
+        else:
+            offspring.linear, modifier.linear = parent2.linear, parent1.linear
 
-        for layer_idx, layer_size in enumerate(size[1:]):
-            if layer_idx < min(len(parent1.layers), len(parent2.layers)):
-                weight1 = parent1.layers[layer_idx].weight
-                weight2 = parent2.layers[layer_idx].weight
-                bias1 = parent1.layers[layer_idx].bias if parent1.layers[layer_idx].bias is not None else None
-                bias2 = parent2.layers[layer_idx].bias if parent2.layers[layer_idx].bias is not None else None
+        # crossover conv layers
+        for idx in range(len(modifier.conv)):
+            weight1 = offspring.conv[idx][0].weight
+            weight2 = modifier.conv[idx][0].weight
+            bias1 = offspring.conv[idx][0].bias if offspring.conv[idx][0].bias is not None else None
+            bias2 = modifier.conv[idx][0].bias if modifier.conv[idx][0].bias is not None else None
 
-                # Apply random mask to weights and biases for crossover
-                mask = torch.rand(layer_size, device=weight1.device) < 0.5
-                offspring_layer_weight = torch.where(mask.unsqueeze(1).expand_as(weight1), weight1, weight2)
-                    
-                if bias1 is not None and bias2 is not None:
-                    offspring_layer_bias = torch.where(mask, bias1, bias2)
-                else:
-                    offspring_layer_bias = bias1 if bias1 is not None else bias2
-
-                offspring.layers[layer_idx].weight.data.copy_(offspring_layer_weight)
-                if offspring_layer_bias is not None:
-                    offspring.layers[layer_idx].bias.data.copy_(offspring_layer_bias)
-
-                # Crossover activation function
-                if layer_idx == len(parent1.activation) - 1:
-                    offspring.activation[layer_idx] = parent2.activation[layer_idx]
-                elif layer_idx == len(parent2.activation) - 1:
-                    offspring.activation[layer_idx] = parent1.activation[layer_idx]
-                else:
-                    offspring.activation[layer_idx] = parent1.activation[layer_idx] if random.random() < 0.5 else parent2.activation[layer_idx]
+            # Apply random mask to weights and biases for crossover
+            mask = torch.rand_like(weight1, device=weight1.device) < 0.5
+            offspring_layer_weight = torch.where(mask, weight1, weight2)
                 
-            elif layer_idx < len(parent1.layers):
-                offspring.layers[layer_idx] = parent1.layers[layer_idx]
-                offspring.activation[layer_idx] = parent1.activation[layer_idx]
-            elif layer_idx < len(parent2.layers):
-                offspring.layers[layer_idx] = parent2.layers[layer_idx]
-                offspring.activation[layer_idx] = parent2.activation[layer_idx]
+            if bias1 is not None and bias2 is not None:
+                mask = torch.rand_like(bias1, device=weight1.device) < 0.5
+                offspring_layer_bias = torch.where(mask, bias1, bias2)
+            else:
+                offspring_layer_bias = bias1 if bias1 is not None else bias2
+
+            offspring.conv[idx][0].weight.data.copy_(offspring_layer_weight)
+            if offspring_layer_bias is not None:
+                offspring.conv[idx][0].bias.data.copy_(offspring_layer_bias)
+
+            # Crossover activation function
+            offspring.conv[idx][1].activation = offspring.conv[idx][1].activation if random.random() < 0.5 else modifier.conv[idx][1].activation
+
+        # adjust maxpool positions
+        offspring.rearrange()
+            
+        # crossover linear layers
+        for idx in range(len(modifier.linear)):
+            weight1 = offspring.linear[idx][0].weight
+            weight2 = modifier.linear[idx][0].weight
+            bias1 = offspring.linear[idx][0].bias if offspring.linear[idx][0].bias is not None else None
+            bias2 = modifier.linear[idx][0].bias if modifier.linear[idx][0].bias is not None else None
+
+            # Apply random mask to weights and biases for crossover
+            mask = torch.rand_like(weight1, device=weight1.device) < 0.5
+            offspring_layer_weight = torch.where(mask, weight1, weight2)
+                
+            if bias1 is not None and bias2 is not None:
+                mask = torch.rand_like(bias1, device=weight1.device) < 0.5
+                offspring_layer_bias = torch.where(mask, bias1, bias2)
+            else:
+                offspring_layer_bias = bias1 if bias1 is not None else bias2
+
+            offspring.linear[idx][0].weight.data.copy_(offspring_layer_weight)
+            if offspring_layer_bias is not None:
+                offspring.linear[idx][0].bias.data.copy_(offspring_layer_bias)
+
+            # Crossover activation function
+            if idx != len(modifier.linear)-1:
+                offspring.linear[idx][1] = offspring.linear[idx][1] if random.random() < 0.5 else modifier.linear[idx][1]
 
         return offspring
 
     @torch.no_grad()
-    def mutate(self, network: ATNetwork):
+    def mutate(self, network: DNA):
         """
         Mutate the given network with a small probability.
-
-        Args:
-            network (ATNetwork): The network to mutate.
-        """
         
-        if random.random() < self.layer_mutation_rate:
-            network.evolve_layer()
-        if random.random() < self.network_mutation_rate:
-            network.evolve_network()
-        if random.random() < self.activation_mutation_rate:
-            network.evolve_activation(self.activation_dict)
-
-        network.evolve_weight(self.weight_mutation_rate, self.perturbation_rate)
-
-    @torch.no_grad()
-    def prune_network(self, network: ATNetwork):
-        """
-        Prune neurons in the network with weights below the threshold.
-
         Args:
-            network (ATNetwork): The network to prune.
+            network (DNA): The network to mutate.
         """
-        network.prune(threshold=self.threshold)
+        if random.random() > self.linear_mutation_rate:
+            network.evolve_linear_network()
+        if random.random() > self.conv_mutation_rate:
+            network.evolve_conv_network()
+        if random.random() > self.add_neuron_mutation_rate:
+            network.evolve_linear_layer()
+        if random.random() > self.add_filter_mutation_rate:
+            network.evolve_conv_layer()
+        if random.random() > self.activation_mutation_rate:
+            network.evolve_activation(self.activation_dict)
+        network.evolve_weight(self.weight_mutation_rate, self.perturbation_rate)
 
                 
     def run_generation(self, metrics: int=0) -> float:
@@ -220,8 +241,7 @@ class ATGEN(nn.Module):
         print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ all_fitness[metrics] }{RESET_COLOR}"
         self.last_fitness = all_fitness[metrics] 
         if all_fitness[metrics] > self.best_fitness: 
-            self.best_fitness = all_fitness[metrics] 
-            self.memory.clear()
+            self.best_fitness = all_fitness[metrics]
 
         # selection of parents
         fits = sorted([fit for fit in self.fitness_scores], reverse=True)[:self.crossover_rate]
@@ -238,11 +258,14 @@ class ATGEN(nn.Module):
             parent1, parent2 = self.select_parents()
             offspring = self.crossover(parent1, parent2)
             self.mutate(offspring)
+            offspring = ATNetwork.phenotype(offspring)
             new_population.append(offspring)
         self.population.extend(new_population)
+
         print(print_current_best)
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
         self.population[0].summary()
+
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
@@ -271,7 +294,7 @@ class ATGEN(nn.Module):
                         if last_fitness >= fitness:
                             print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
                             break
-
+        
         elif fitness is not None:
             generation =  0
             while fitness > last_fitness:
@@ -289,8 +312,7 @@ class ATGEN(nn.Module):
         
         if save_name is not None:
             self.population[0].save_network(save_name)
-
-        # TODO: plot or return
+        
         if plot:
             plt.plot(range(len(mean)), mean, label='Mean Fitness')
             plt.fill_between(range(len(mean)), minimum, maximum, alpha=0.2, label='Confidence Interval')
@@ -354,14 +376,60 @@ def refine_genome(args):
 
     
 if __name__ == "__main__":
+    # Initialize the ATGEN instance
+    ga = ATGEN(population_size=10, layers=[8, 1, 4])
+    
     # Create parent networks with specified architectures
     parent1 = ATNetwork(10, 2, 5, 1)
     parent2 = ATNetwork(10, 2, 4, 3, 1)
     
-    # Initialize the ATGEN instance
-    ga = ATGEN(population_size=10, layers=[8, 1, 4])
+    # Perform crossover
+    offspring = ga.crossover(parent1.genotype(), parent2.genotype())
+    offspring = ATNetwork.phenotype(offspring)
+    offspring.summary()
+    
+    # Create CNN parent networks
+    parent1 = ATNetwork(
+        Conv2D(3, 32),
+        ActiSwitch(nn.ReLU()),
+        MaxPool2D(),
+        Conv2D(32, 64),
+        ActiSwitch(nn.ReLU()),
+        MaxPool2D(),
+        Flatten(),
+        LazyLinear(100),
+        ActiSwitch(nn.ReLU()),
+        Linear(100, 10),
+        input_size=(32, 32)
+    )
+    parent2 = ATNetwork(
+        Conv2D(3, 32),
+        ActiSwitch(nn.ReLU()),
+        MaxPool2D(),
+        Conv2D(32, 64),
+        ActiSwitch(nn.ReLU()),
+        Conv2D(64, 64),
+        ActiSwitch(nn.ReLU()),
+        MaxPool2D(),
+        Flatten(),
+        LazyLinear(200),
+        ActiSwitch(nn.ReLU()),
+        Linear(200, 100),
+        ActiSwitch(nn.ReLU()),
+        Linear(100, 10),
+        input_size=(32, 32)
+    )
+    parent1.summary()
+    parent2.summary()
+    # summary(parent1, (3, 32, 32), device="cpu")
+    # summary(parent2, (3, 32, 32), device="cpu")
     
     # Perform crossover
-    offspring = ga.crossover(parent1, parent2)
+    parent2 = parent2.genotype()
+    print(len(parent2.conv))
+    parent2.evolve_conv_layer(1)
+    offspring = ga.crossover(parent1.genotype(), parent2)
+    offspring = ATNetwork.phenotype(offspring)
     offspring.summary()
+    # summary(offspring, (3, 32, 32), device="cpu")
 

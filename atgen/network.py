@@ -6,11 +6,11 @@ from typing import List
 import random
 from inspect import isfunction
 
-from .utils import BLUE, BOLD, RESET_COLOR
-from .layers.activations import ActiSwitch, Pass
-from .layers.linear import Linear, Flatten, LazyLinear
-from .layers.conv import Conv2D, MaxPool2D, LazyConv2D
-from .dna import DNA
+from utils import BLUE, BOLD, RESET_COLOR
+from layers.activations import ActiSwitch, Pass
+from layers.linear import Linear, Flatten, LazyLinear
+from layers.conv import Conv2D, MaxPool2D, LazyConv2D
+from dna import DNA
 
 from math import fabs as abs
 
@@ -46,12 +46,12 @@ class ATNetwork(nn.Module):
             self.layers = nn.ModuleList()
             self.activation = nn.ModuleList()
             for layer in layers:
-                if isinstance(layer, ActiSwitch) or isinstance(layer, Pass):
+                if isinstance(layer, ActiSwitch):
                     if len(self.activation) > 0: # if ActiSwitch is the first layer
                         self.activation.pop(-1)
-                    else:
-                        self.layers.append(Pass()) # this entire condition should be self.activation.pop(-1) without handling this case
                     self.activation.append(layer)
+                elif isinstance(layer, Pass):
+                    pass
                 else:
                     self.layers.append(layer)
                     self.activation.append(Pass())
@@ -84,123 +84,17 @@ class ATNetwork(nn.Module):
                 input_size, channels = layer.store_sizes(input_size, channels)
             elif isinstance(layer, LazyLinear):
                 input_size = layer.custom_init(input_size)
-    
-
-    def evolve_network(self, idx=None):
-        """
-        Evolve the network by adding a new layer with identity initialization.
-
-        Args:
-            idx (int, optional): The index at which to insert the new layer. If None, a random index is chosen.
-
-        Modifies:
-            The network architecture is modified in place with an additional layer and activation function.
-        """
-        idx = random.randint(0, len(self.layers)-1) if idx is None else idx
-        self.layers.insert(idx, Linear.init_identity_layer(self.layers[idx].in_features, True if self.layers[idx].bias is not None else False))
-        self.activation.insert(idx, ActiSwitch(self.default_activation, True))
-        if self.input_size is not None:
-            self.store_sizes()
-
-    def evolve_layer(self, idx=None):
-        """
-        Add a new neuron to an existing layer and adjust subsequent layers accordingly.
-
-        Args:
-            idx (int, optional): The index of the layer to evolve. If None, a random layer is selected.
-
-        Modifies:
-            The specified layer is expanded by one neuron, and the next layer's input dimension is increased by one.
-        """
-        if len(self.layers) > 1: # to avoid changing output layer shape
-            idx = random.randint(0, len(self.layers) - 2) if idx is None else idx
-            self.layers[idx].add_neuron()
-            if idx < len(self.layers) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
-                self.layers[idx + 1].add_weight()
-        elif idx is not None: # handle if only 1 output layer in crossover
-            self.layers[idx].add_neuron()
-        if self.input_size is not None:
-            self.store_sizes()
-        # self.summary()
-
-
-    @torch.no_grad()
-    def evolve_weight(self, mutation_rate, perturbation_rate):
-        """
-        Apply random noise to the network weights to facilitate evolutionary adaptation.
-
-        Args:
-            mutation_rate (float): The probability of applying noise to each parameter.
-            perturbation_rate (float): The magnitude of noise to apply.
-
-        Modifies:
-            Adds Gaussian noise to the weights of the network with a probability defined by 'mutation_rate'.
-        """
-        for param in self.parameters():
-            if random.random() < mutation_rate:
-                noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
-                param.add_(noise)
-        if self.input_size is not None:
-            self.store_sizes()
-        # self.summary()
-
-
-    def evolve_activation(self, activation_dict: List[nn.Module], idx=None):
-        """
-        Change the activation function of a specified layer to a new random function from a given list.
-
-        Args:
-            activation_dict (List[nn.Module]): A list of possible activation functions to choose from.
-            idx (int, optional): The index of the layer whose activation function should be changed. 
-                If None, a random layer is selected.
-
-        Modifies:
-            Replaces the activation function of the specified layer with a randomly selected function from 'activation_dict'.
-        """
-        if len(self.activation) > 1: # to avoid changing output layer activation
-            idx = random.randint(0, len(self.layers)-2) if idx is None else idx
-            activation = random.choice(activation_dict)
-            self.activation[idx].change_activation(activation)
-        if self.input_size is not None:
-            self.store_sizes()
-        # self.summary()
-
-
-    def prune(self, threshold: float = 0.01):
-        """
-        Prune neurons with weights below a given threshold.
-        
-        Args:
-            threshold (float): The threshold below which neurons will be pruned.
-        """
-        for i, layer in enumerate(self.layers[:-1]):
-            if (isinstance(layer, Linear) or isinstance(layer, LazyLinear)) and layer.out_features > 1:
-                try:
-                    # Identify neurons to prune
-                    neurons_to_prune = []
-                    for neuron_idx in range(layer.out_features):
-                        neuron_weights = layer.weight[neuron_idx].abs()
-                        if torch.max(neuron_weights) < threshold:
-                            neurons_to_prune.append(neuron_idx)
-                    
-                    for neuron_idx in reversed(neurons_to_prune):
-                        layer.remove_neuron(neuron_idx)
-                        self.layers[i + 1].remove_weight(neuron_idx)
-                except:
-                    pass
-        if self.input_size is not None:
-            self.store_sizes()
 
 
     def genotype(self) -> DNA:
-        genome = DNA(self.input_size)
+        genome = DNA(self.input_size, self.default_activation)
         for i, (layer, activation) in enumerate(zip(self.layers, self.activation)):
             if isinstance(layer, Linear) or isinstance(layer, LazyLinear):
-                genome.append_linear((layer, activation))
+                genome.append_linear([layer, activation])
             elif isinstance(layer, Conv2D) or isinstance(layer, LazyConv2D):
-                genome.append_conv((layer, activation))
+                genome.append_conv([layer, activation])
             elif isinstance(layer, MaxPool2D):
-                genome.append_maxpool((i, layer))
+                genome.append_maxpool([i, layer])
             elif isinstance(layer, Flatten):
                 genome.flatten = layer
             
@@ -275,17 +169,19 @@ if __name__ == "__main__":
     x = torch.randn(4, 5)
     y1: torch.Tensor = model(x)
     
+    model = model.genotype()
     for _ in range(10):
-        model.evolve_network()
-    model.summary()
+        model.evolve_linear_network()
+    # model.summary()
     # summary(model, input_size=(5,))
     for _ in range(500):
-        model.evolve_layer()
-    model.summary()
+        model.evolve_linear_layer()
+    # model.summary()
     # summary(model, input_size=(5,))
+    model = ATNetwork.phenotype(model)
         
     y2: torch.Tensor = model(x)
-    model.prune()
+    # model.prune()
     model.summary()
     # summary(model, input_size=(5,))
 

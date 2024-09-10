@@ -1,18 +1,22 @@
 # import copy
-# import random
+import math
+import random
+from typing import List, Tuple
 
-# import torch
+import torch
+from torch import nn
 
-# from layers import ActiSwitch, Conv2D, Linear, Flatten
+from layers import ActiSwitch, Conv2D, Linear, Flatten, MaxPool2D, Pass
 
 
 class DNA:
-    def __init__(self, input_size=None):
-        self.input_size = input_size
-        self.flatten = None
-        self.conv = []
-        self.maxpool = []
-        self.linear = []
+    def __init__(self, input_size=None, default_activation=nn.ReLU()):
+        self.input_size: Tuple[int, int] = input_size
+        self.flatten: Flatten = None
+        self.conv: List[Tuple[Conv2D, ActiSwitch]] = []
+        self.maxpool: List[Tuple[int, MaxPool2D]] = []
+        self.linear: List[Tuple[Linear, ActiSwitch]] = []
+        self.default_activation: nn.ReLU = default_activation
     
     def append_conv(self, conv):
         self.conv.append(conv)
@@ -23,27 +27,16 @@ class DNA:
     def append_maxpool(self, maxpool):
         self.maxpool.append(maxpool)
     
-    # def __add__(self, dna: "DNA"):
-    #     new_dna = DNA(self.input_size)
-    #     new_dna.flatten = self.flatten
-    #     if self.conv:
-    #         new_dna.conv, new_dna.maxpool = conv_crossover(self.conv, dna.conv, self.maxpool)
-    #     if self.linear:
-    #         new_dna.linear = linear_crossover(self.linear, dna.linear)
-    #     return new_dna
-    
     def __str__(self) -> str:
-        return f"""DNA Sequence:
-        Input Size: {self.input_size}
-        {f"Conv: {len(self.conv)}" if self.conv else ""}
-        {f"MaxPool: {len(self.maxpool)}" if self.maxpool else ""}
-        {f"Linear: {len(self.linear)}" if self.linear else ""}"""
+        return f'DNA Sequence:\n\tInput Size: {self.input_size}{f"\n\tConv: {len(self.conv)}" if self.conv else ""}{f"\n\tMaxPool: {len(self.maxpool)}" if self.maxpool else ""}{f"\n\tLinear: {len(self.linear)}" if self.linear else ""}'
     
     def reconstruct(self):
         layers = []
         if self.conv:
             for layer in self.conv:
-                layers.extend(layer)
+                layers.append(layer[0])
+                if isinstance(layer[1], ActiSwitch):
+                    layers.append(layer[1])
         if self.maxpool:
             for layer in self.maxpool:
                 layers.insert(*layer)
@@ -51,101 +44,123 @@ class DNA:
             layers.append(self.flatten)
         if self.linear:
             for layer in self.linear:
-                layers.extend(layer)
-        print(layers)
+                layers.append(layer[0])
+                if isinstance(layer[1], ActiSwitch):
+                    layers.append(layer[1])
+        
         return layers
     
     def linear_size(self):
-        return [self.linear[0][0].in_features, *[layer[0].out_features for layer in self.linear]]
+        return [layer[0].out_features for layer in self.linear]
     
     def conv_size(self):
-        return [self.conv[0][0].in_channels, *[layer[0].out_channels for layer in self.conv]]
+        return [layer[0].out_channels for layer in self.conv]
+    
+    def rearrange(self):
+        if self.maxpool:
+            len_conv, len_maxpool = len(self.conv), len(self.maxpool)
+            gap = math.ceil(len_conv/len_maxpool)
+
+            for i in range(1, len_maxpool):
+                self.maxpool[i-1][0] = i * gap * 2 + (i - 1)
+            self.maxpool[-1][0] = len_conv * 2 +len_maxpool
+    
+    def evolve_linear_network(self, idx: int=None):
+        if self.linear:
+            idx = random.randint(0, len(self.linear)-1) if idx is None else idx
+            self.linear.insert(idx, [
+                Linear.init_identity_layer(self.linear[idx][0].in_features, True if self.linear[idx][0].bias is not None else False, self.linear[idx][0].norm_type), 
+                ActiSwitch(self.default_activation, True)
+            ])
+    
+    def evolve_conv_network(self, idx: int=None):
+        if self.conv:
+            idx = random.randint(0, len(self.conv)-1) if idx is None else idx
+            self.conv.insert(idx, [
+                Conv2D.init_identity_layer(self.conv[idx][0].in_channels, self.conv[idx][0].kernel_size, True if self.conv[idx][0].bias is not None else False, self.conv[idx][0].norm), 
+                ActiSwitch(self.default_activation, True)
+            ])
+    
+    def evolve_linear_layer(self, idx: int=None):
+        if len(self.linear) > 1: # to avoid changing output layer shape
+            idx = random.randint(0, len(self.linear) - 2) if idx is None else idx
+            self.linear[idx][0].add_neuron()
+            if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
+                self.linear[idx + 1][0].add_weight()
+        elif idx is not None: # handle if only 1 output layer in crossover
+            self.linear[idx][0].add_neuron()
+    
+    def evolve_conv_layer(self, idx: int=None, end_layer=False):
+        if self.conv:
+            idx = random.randint(0, len(self.conv) - 1) if idx is None else idx
+            self.conv[idx][0].add_output_channel()
+            if idx < (len(self.conv) - 1): # handle transition from Conv to Linear in crossover
+                self.conv[idx + 1][0].add_input_channel()
+            else:
+                if not end_layer:
+                    channels, features = self.conv[idx][0].out_channels, self.linear[0][0].in_features
+                    for _ in range(int(features*channels/(channels-1)-features+1)):
+                        self.linear[0][0].add_weight()
+
+    @torch.no_grad()
+    def evolve_weight(self, mutation_rate, perturbation_rate):
+        if self.conv:
+            for layer in self.conv:
+                for param in layer[0].parameters():
+                    if random.random() < mutation_rate:
+                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                        param.add_(noise)
+        if self.linear:
+            for layer in self.linear:
+                for param in layer[0].parameters():
+                    if random.random() < mutation_rate:
+                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                        param.add_(noise)
+
+    def evolve_activation(self, activation_dict: List[nn.Module]):
+        if self.conv:
+            idx = random.randint(0, len(self.conv)-1)
+            if isinstance(self.conv[idx][1], ActiSwitch):
+                self.conv[idx][1].change_activation(random.choice(activation_dict))
+        if len(self.linear) > 1:
+            idx = random.randint(0, len(self.linear)-2)
+            if isinstance(self.linear[idx][1], ActiSwitch):
+                self.linear[idx][1].change_activation(random.choice(activation_dict))
+
+    def prune(self, threshold: float = 0.01):
+        """
+        Prune neurons with weights below a given threshold.
+        
+        Args:
+            threshold (float): The threshold below which neurons will be pruned.
+        """
+        for i, layer in enumerate(self.linear[:-1]):
+            if layer[0].out_features > 1:
+                # Identify neurons to prune
+                neurons_to_prune = []
+                for neuron_idx in range(layer[0].out_features):
+                    neuron_weights = layer[0].weight[neuron_idx].abs()
+                    if torch.max(neuron_weights) < threshold:
+                        neurons_to_prune.append(neuron_idx)
+                
+                for neuron_idx in reversed(neurons_to_prune):
+                    if layer[0].out_features > 1:
+                        layer[0].remove_neuron(neuron_idx)
+                        self.linear[i + 1][0].remove_weight(neuron_idx)
+
+        for i, layer in enumerate(self.conv[:-1]):
+            if layer[0].out_channels > 1:
+                # Identify filters to prune
+                filters_to_prune = []
+                for neuron_idx in range(layer[0].out_channels):
+                    neuron_weights = layer[0].weight[neuron_idx].abs()
+                    if torch.max(neuron_weights) < threshold:
+                        filters_to_prune.append(neuron_idx)
+                
+                for neuron_idx in reversed(filters_to_prune):
+                    if layer[0].out_channels > 1:
+                        layer[0].remove_output_channel(neuron_idx)
+                        self.conv[i + 1][0].remove_input_channel(neuron_idx)
     
     
 
-# # Helper functions
-# def get_removal_indices_for_larger_list(original_list, required_items):
-#     return sorted(random.sample(range(len(original_list)), len(original_list)-required_items), reverse=True)
-
-# def get_inserted_indices_for_shorter_list(original_list, required_items):
-#     return sorted(random.sample(range(1, required_items-1), required_items-len(original_list)), reverse=True)
-    
-# def network_arranger(net1, net2):
-#     l1, l2 = len(net1), len(net2)
-#     if l1 > l2:
-#         longer_net, shorter_net = net1, net2
-#     else:
-#         shorter_net, longer_net = net1, net2
-#     l = random.randint(min(l1, l2), max(l1, l2))
-#     longer_indices = get_removal_indices_for_larger_list(longer_net, l)
-#     shorter_indices = get_inserted_indices_for_shorter_list(shorter_net, l)
-#     return longer_net, shorter_net, longer_indices, shorter_indices
-
-# # Network crossover
-# def conv_crossover(conv1, conv2, maxpool):
-#     new_conv = []
-#     new_maxpool = []
-#     longer_net, shorter_net, longer_indices, shorter_indices = network_arranger(conv1, conv2)
-#     shorter_net: list
-#     longer_net: list
-
-#     '''handle lengths and weights'''
-#     for idx in longer_indices:
-#         longer_net.pop(idx)
-
-#     for idx in shorter_indices:
-#         layer, activation = shorter_net[idx-1][0], shorter_net[idx-1][1]
-#         shorter_net.insert(idx, (
-#             Conv2D.init_identity_layer(layer.out_channels, layer.kernel_size, True if layer.bias is not None else False, layer.norm), 
-#             ActiSwitch(activation.activation, True)
-#             ))
-    
-#     for i in range(len(longer_net)):
-#         new_conv.append(conv_crossover_layer(longer_net[i], shorter_net[i]))
-
-#     maxpool_indices = get_inserted_indices_for_shorter_list(longer_net, len(maxpool))
-#     for idx in maxpool_indices:
-#         new_maxpool.append((idx, maxpool.pop()[1]))
-    
-#     return new_conv, new_maxpool
-
-# def linear_crossover(linear1, linear2):
-#     new_linear = []
-#     longer_net, shorter_net, longer_indices, shorter_indices = network_arranger(linear1, linear2)
-
-#     '''handle lengths and weights'''
-#     for idx in longer_indices:
-#         longer_net.pop(idx)
-
-#     for idx in shorter_indices:
-#         layer, activation = shorter_net[idx-1][0], shorter_net[idx-1][1]
-#         shorter_net.insert(idx, (
-#             Linear.init_identity_layer(layer.out_features, True if layer.bias is not None else False, layer.norm_type), 
-#             ActiSwitch(activation.activation, True)
-#             ))
-    
-#     for i in range(len(longer_net)):
-#         new_linear.append(linear_crossover_layer(longer_net[i], shorter_net[i]))
-#     return new_linear
-
-# # Layers crossover
-# def conv_crossover_layer(conv1: Conv2D, conv2: Conv2D):
-#     if conv1.in_channels > conv2.in_channels:
-#         for _ in range(conv1.in_channels-conv2.in_channels):
-#             conv1.add_input_channel()
-#     if conv2.in_channels > conv1.in_channels:
-#         for _ in range(conv1.in_channels-conv2.in_channels):
-#             conv2.add_input_channel()
-#     if conv1.out_channels > conv2.out_channels:
-#         for _ in range(conv1.out_channels-conv2.out_channels):
-#             conv1.add_output_channel()
-#     if conv2.out_channels > conv1.out_channels:
-#         for _ in range(conv1.out_channels-conv2.out_channels):
-#             conv2.add_output_channel()
-            
-#     # Apply random mask to weights and biases for crossover
-#     mask = torch.rand_like(conv1.weight.data, device=conv1.weight.device) < 0.5
-#     offspring_layer_weight = torch.where(mask, conv1.weight.data, conv2.weight.data)
-
-# def linear_crossover_layer(linear1: Linear, linear2: Linear):
-#     pass

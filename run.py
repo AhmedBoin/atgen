@@ -16,8 +16,9 @@ env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, layers: F.List[int]):
-        super().__init__(population_size, layers, activation=torch.nn.ReLU(), last_activation=Pass(), batch_size=128, crossover_rate=0.80, 
-                         weight_mutation_rate=0.01, perturbation_rate=0.02, layer_mutation_rate=0.01, network_mutation_rate=0.01, activation_mutation_rate=0.01)
+        super().__init__(population_size, layers, activation=torch.nn.ReLU(), last_activation=Pass(),
+                         crossover_rate = 0.5, weight_mutation_rate=0.01, perturbation_rate=0.9, add_neuron_mutation_rate=0.2, 
+                 add_filter_mutation_rate=0.5, linear_mutation_rate=0.5, conv_mutation_rate=0.5, activation_mutation_rate=0.001)
 
     def fitness_fn(self, model: ATNetwork):
         epochs = 3
