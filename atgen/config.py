@@ -14,31 +14,31 @@ class ATGENConfig:
         self.default_activation = default_activation
         self.last_activation = last_activation
         self.bias = bias
-
+        
         self.crossover_rate = crossover_rate
         self.crossover_decay_rate = crossover_decay_rate
         self.last_crossover_rate = last_crossover_rate
-
+        
         self.mutation_decay_rate = mutation_decay_rate
         self.last_mutation_rate = last_mutation_rate
         self.remove = remove
-
+        
         self.weight_mutation_rate = weight_mutation_rate
         self.perturbation_rate = perturbation_rate
-
+        
         self.add_neuron_mutation_rate = add_neuron_mutation_rate
         self.add_filter_mutation_rate = add_filter_mutation_rate
         self.linear_mutation_rate = linear_mutation_rate
         self.conv_mutation_rate = conv_mutation_rate
-
+        
         self.activation_mutation_rate = activation_mutation_rate
         self.activation_dict = activation_dict
-
+        
         self.species_metrics = species_metrics
         self.threshold = threshold
         self.linear_start = linear_start
         self.input_size = input_size
-
+        
 
     def crossover_step(self):
         self.crossover_rate = max(self.mutation_decay_rate*self.crossover_rate, self.last_crossover_rate)
