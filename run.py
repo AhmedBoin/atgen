@@ -17,10 +17,10 @@ env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, layers: F.List[int]):
-        super().__init__(population_size, layers, ATGENConfig())
+        super().__init__(population_size, layers, ATGENConfig(last_mutation_rate=0.01, neuron_mutation_rate=0.02))
 
     def fitness_fn(self, model: ATNetwork):
-        epochs = 2
+        epochs = 3
         env = gym.make("LunarLander-v2")
         total_reward = 0
         for _ in range(epochs):
@@ -110,8 +110,8 @@ class NeuroEvolution(ATGEN):
 
 if __name__ == "__main__":
     ne = NeuroEvolution(1000, [8, 4])
-    # ne.load_population()
-    ne.evolve(fitness=280, save_name="ATNetwork.pth", metrics=0, plot=True)
+    ne.load_population()
+    # ne.evolve(fitness=280, save_name="ATNetwork.pth", metrics=0, plot=True)
     
     # model = ATNetwork.load_network()
     model = ne.population[1]

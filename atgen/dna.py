@@ -81,26 +81,45 @@ class DNA:
                 ActiSwitch(self.default_activation, True)
             ])
     
-    def evolve_linear_layer(self, idx: int=None):
+    def evolve_linear_layer(self, idx: int=None, remove=False):
         if len(self.linear) > 1: # to avoid changing output layer shape
             idx = random.randint(0, len(self.linear) - 2) if idx is None else idx
-            self.linear[idx][0].add_neuron()
-            if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
-                self.linear[idx + 1][0].add_weight()
+            if not remove:
+                self.linear[idx][0].add_neuron()
+                if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
+                    self.linear[idx + 1][0].add_weight()
+            elif self.linear[idx][0].out_features > 1:
+                n_idx = random.randint(0, self.linear[idx][0].out_features-1)
+                self.linear[idx][0].remove_neuron(n_idx)
+                if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
+                    self.linear[idx + 1][0].remove_weight(n_idx)
         elif idx is not None: # handle if only 1 output layer in crossover
-            self.linear[idx][0].add_neuron()
+            if not remove:
+                self.linear[idx][0].add_neuron()
     
-    def evolve_conv_layer(self, idx: int=None, end_layer=False):
+    def evolve_conv_layer(self, idx: int=None, end_layer=False, remove=False):
         if self.conv:
             idx = random.randint(0, len(self.conv) - 1) if idx is None else idx
-            self.conv[idx][0].add_output_channel()
-            if idx < (len(self.conv) - 1): # handle transition from Conv to Linear in crossover
-                self.conv[idx + 1][0].add_input_channel()
-            else:
-                if not end_layer:
-                    channels, features = self.conv[idx][0].out_channels, self.linear[0][0].in_features
-                    for _ in range(int(features*channels/(channels-1)-features+1)):
-                        self.linear[0][0].add_weight()
+            if not remove:
+                self.conv[idx][0].add_output_channel()
+                if idx < (len(self.conv) - 1): # handle transition from Conv to Linear in crossover
+                    self.conv[idx + 1][0].add_input_channel()
+                else:
+                    if not end_layer:
+                        size = int(self.linear[0][0].in_features/(self.conv[idx][0].out_channels-1))
+                        for _ in range(size):
+                            self.linear[0][0].add_weight()
+            elif self.conv[idx][0].out_channels > 1:
+                n_idx = random.randint(0, self.conv[idx][0].out_channels-1)
+                self.conv[idx][0].remove_output_channel(n_idx)
+                if idx < (len(self.conv) - 1): # handle transition from Conv to Linear
+                    self.conv[idx + 1][0].remove_input_channel(n_idx)
+                else:
+                    if not end_layer:
+                        size = int(self.linear[0][0].in_features/(self.conv[idx][0].out_channels+1))
+                        for i in range(size):
+                            self.linear[0][0].remove_weight(size*n_idx + i)
+
 
     @torch.no_grad()
     def evolve_weight(self, mutation_rate, perturbation_rate):

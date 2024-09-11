@@ -207,10 +207,10 @@ class ATGEN(nn.Module):
             network.evolve_linear_network()
         if random.random() < self.config.conv_mutation_rate:
             network.evolve_conv_network()
-        if random.random() < self.config.add_neuron_mutation_rate:
-            network.evolve_linear_layer()
-        if random.random() < self.config.add_filter_mutation_rate:
-            network.evolve_conv_layer()
+        if random.random() < self.config.neuron_mutation_rate:
+            network.evolve_linear_layer(remove=self.config.remove)
+        if random.random() < self.config.filter_mutation_rate:
+            network.evolve_conv_layer(remove=self.config.remove)
         if random.random() < self.config.activation_mutation_rate:
             network.evolve_activation(self.config.activation_dict)
         network.evolve_weight(self.config.weight_mutation_rate, self.config.perturbation_rate)
