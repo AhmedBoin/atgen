@@ -4,55 +4,6 @@ from torch import nn
 import inspect
 
 
-class Pass(nn.Module):
-    """pass input as it's, helper class for forward method of evolve network"""
-    def forward(self, x: torch.Tensor):
-        return x
-    
-    def print_layer(self, i: int):
-        print(f"{self.__class__.__name__:<15}")
-
-    # @property
-    # def params_count(self):
-    #     return 0
-
-
-class GradientControl(torch.autograd.Function):
-    """
-    A custom autograd function to control the gradient flow for the weight parameter in the ActiSwitch layer.
-
-    `GradientControl` is designed to ensure that the weight parameter within the `ActiSwitch` module 
-    stays within the range [0, 1] during training. It allows the gradient to propagate in a controlled 
-    manner, enforcing the following rules:
-    
-    - If the weight is between 0 and 1, the gradient is applied normally.
-    - If the weight is exactly 0, only positive gradients are allowed to increase the weight.
-    - If the weight is exactly 1, only negative gradients are allowed to decrease the weight.
-
-    This function modifies the gradient during backpropagation to ensure the weight does not 
-    exceed the bounds of [0, 1] while still allowing learning when at the boundaries.
-
-    Methods:
-        forward(ctx, weight: torch.Tensor) -> torch.Tensor:
-            Saves the input tensor for use in the backward pass and returns the tensor unchanged.
-        backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
-            Adjusts the gradient based on the weight's current value:
-              - Passes the gradient through if the weight is within bounds.
-              - Allows increasing gradient only if the weight is at 0.
-              - Allows decreasing gradient only if the weight is at 1.
-    """
-    @staticmethod
-    def forward(ctx, weight):
-        ctx.save_for_backward(weight)
-        return torch.sigmoid(weight * 20)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        (weight,) = ctx.saved_tensors
-        
-        return torch.sigmoid(weight) * (1-torch.sigmoid(weight)) * grad_output
-
-
 class ActiSwitch(nn.Module):
     """
     A custom neural network module that allows dynamic blending between a linear function 
@@ -91,16 +42,15 @@ class ActiSwitch(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear_weight * x + self.activation_weight * self.activation(x)
     
-    def change_activation(self, activation=nn.ReLU):
-        self.activation = activation()
+    def linear(self):
+        self.linear_weight = nn.Parameter(torch.tensor(1.0))
+        self.activation_weight = nn.Parameter(torch.tensor(0.0))
+        return self
     
-    def print_layer(self, i: int):
-        print(f"{self.__class__.__name__}({self.activation.__name__ if inspect.isfunction(self.activation) else self.activation.__class__.__name__}, {f'{100*(abs(self.activation_weight.item())/(abs(self.linear_weight.item())+abs(self.activation_weight.item()))):.2f}':<6}%)")
-
-    # @property
-    # def params_count(self):
-    #     return 0
-
+    def nonlinear(self):
+        self.linear_weight = nn.Parameter(torch.tensor(0.0))
+        self.activation_weight = nn.Parameter(torch.tensor(1.0))
+        return self
 
 if __name__ == "__main__":
     linear_pass_relu = ActiSwitch(nn.Tanh())

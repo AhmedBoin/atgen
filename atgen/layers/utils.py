@@ -1,38 +1,44 @@
-import math
+'''
+this namespace to distinguish between different types of layers:
+some layers requires modifying the following layers, and some other doesn't requires,
+also when initializing identity element we need to distinguish where to stop and which layers to copy  
+for identity element:
+    - copy every thing from `Evolve` to `Activation`
+    - if there is `Follow`, `Copy` or `Activation` layers between just copy both
+    - if there is `Skip` layer, don't copy
+for modification:
+    - copy every thing from `Evolve` to next `Evolve`
+    - if there is `Follow` layer edit it corresponding to the previous editing
+    - if there is `Copy` or `Activation` layers between just copy both
+    - if there is `Skip` layer, don't copy
+    - if you reach the next `Evolve` layer modify its input corresponding to the previous editing
+'''
+
+from typing import List, Tuple
+from torch import nn
 
 
+class EvolveAction:
+    IncreaseIn  = "IncreaseIn"            # i.e increase weights in linear or in_channel for cnn
+    IncreaseOut = "IncreaseOut"           # i.e increase neurons in linear or out_channel for cnn
+    DecreaseIn  = "DecreaseIn"            # i.e decrease weights in linear or in_channel for cnn
+    DecreaseOut = "DecreaseOut"           # i.e decrease neurons in linear or out_channel for cnn
 
-def conv2d_output_size(input_size, kernel_size, padding, stride):
-    """
-    Calculate the output size (height or width) of a Conv2D layer.
 
-    Parameters:
-    - input_size: int, the size of the input (height or width)
-    - kernel_size: int, the size of the convolution kernel (height or width)
-    - padding: int, the size of the padding added to each side
-    - stride: int, the stride of the convolution
+class LayerModifier:
+    def __init__(self, follow: List[nn.Module]=[], copy: List[nn.Module]=[], skip: List[nn.Module]=[]):
+        self.follow = follow
+        self.copy = copy
+        self.skip = skip
 
-    Returns:
-    - int, the output size after applying the Conv2D layer
-    """
-    return math.floor((input_size + 2 * padding - kernel_size) / stride) + 1
+    def identity(self, layer: nn.Module) -> nn.Module:
+        raise NotImplementedError(f"you need to implement the identity method for {layer.__class__.__name__}")
 
-def calculate_linear_input_features(input_height, input_width, out_channels, kernel_size, padding, stride):
-    """
-    Calculate the number of input features for a linear layer after a Conv2D layer.
+    def modify(self, layer: nn.Module, evolve_action: str) -> Tuple[nn.Module, bool]:
+        raise NotImplementedError(f"you need to implement the modifier method for {layer.__class__.__name__}")
+    
+    def new(self, layer: nn.Module) -> nn.Module:
+        raise NotImplementedError(f"you need to implement the new method for {layer.__class__.__name__}")
 
-    Parameters:
-    - input_height: int, the height of the input to the Conv2D layer
-    - input_width: int, the width of the input to the Conv2D layer
-    - out_channels: int, the number of output channels of the Conv2D layer
-    - kernel_size: int, the size of the convolution kernel (assuming square kernel)
-    - padding: int, the size of the padding added to each side
-    - stride: int, the stride of the convolution
-
-    Returns:
-    - int, the number of input features for the subsequent linear layer
-    """
-    output_height = conv2d_output_size(input_height, kernel_size, padding, stride)
-    output_width = conv2d_output_size(input_width, kernel_size, padding, stride)
-    return out_channels * output_height * output_width
+    
 

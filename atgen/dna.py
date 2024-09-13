@@ -1,193 +1,329 @@
-# import copy
-import math
+import copy
 import random
-from typing import List, Tuple
+import inspect
+from typing import List, Union
 
 import torch
 from torch import nn
 
-from layers import ActiSwitch, Conv2D, Linear, Flatten, MaxPool2D, Pass
+from utils import BLUE, BOLD, RESET_COLOR
+from layers import ActiSwitch, EvolveAction
+from config import ATGENConfig
+
+
+class EvolveBlock:
+    '''
+    This class represents a block of neural network layers that can evolve. 
+    Each block consists of multiple layers, and provides methods to mutate, 
+    evolve, and create identity transformations of the layers within the block.
+    
+    Attributes:
+    -----------
+    - modules (List[nn.Module]): List of layers in the block.
+    - config (ATGENConfig): Configuration object containing evolution settings.
+    
+    Methods:
+    --------
+    - append(item): Adds a new layer to the block.
+    - pop(idx=-1): Removes the last or specified layer from the block.
+    - full(): Returns True if the block contains at least one layer.
+    - genes(): Calculates the total number of parameters in the block.
+    - mutate(): Checks if the first layer in the block can be mutated (requires gradient).
+    - __iter__(): Returns an iterator over the block's layers.
+    - __len__(): Returns the number of layers in the block.
+    - evolve(action): Evolves the block based on a specific action (e.g., increase or decrease layer size).
+    - identity(): Returns a new block with identity transformations applied to the layers.
+    '''
+    def __init__(self, module: List[nn.Module], config: ATGENConfig):
+        self.modules = module
+        self.config = config
+
+    def append(self, item):
+        self.modules.append(item)
+
+    def pop(self, idx=-1):
+        self.modules.pop(idx)
+
+    def full(self):
+        return len(self.modules) != 0
+    
+    def genes(self):
+        return sum([param.numel() for module in self.modules for param in module.parameters()])
+    
+    def mutate(self):
+        for param in self.modules[0].parameters():
+            return param.requires_grad
+        
+    def __iter__(self):
+        return iter(self.modules)
+    
+    def __len__(self):
+        return len(self.modules)
+    
+    def structure(self):
+        kind = self.modules[0].__class__.__name__
+        if kind.startswith("Lazy"):
+            kind = kind[4:]
+        return kind
+    
+    def new(self) -> "EvolveBlock":
+        new = []
+        modifier = self.config.evolve[self.modules[0].__class__]
+        new.append(modifier.new(self.modules[0]))
+        new.extend(self.modules[1:])
+        return new
+
+    def evolve(self, action: str) -> Union[bool, int]:
+        evolved = []
+        conversion: int = None
+
+        # main layer
+        modifier = self.config.evolve[self.modules[0].__class__]
+        layer, done = modifier.modify(self.modules[0], action)
+        evolved.append(layer)
+
+        # follower layer
+        for layer in self.modules[1:]:
+            if layer.__class__ in modifier.follow:
+                f_modifier = self.config.follow[layer.__class__]
+                n_layer, _ = f_modifier.modify(layer, action)
+                evolved.append(n_layer)
+            else:
+                evolved.append(layer)
+
+            if isinstance(layer, nn.Flatten): # special case
+                if isinstance(self.modules[0], nn.Conv2d):
+                    conversion: int = self.modules[0].weight.data.shape[0]
+
+        self.modules = evolved
+        return conversion if conversion is not None else done
+            
+    
+    def identity(self) -> "EvolveBlock":
+        evolved = []
+
+        # main layer
+        modifier = self.config.evolve[self.modules[0].__class__]
+        layer = modifier.identity(self.modules[0])
+        evolved.append(layer)
+
+        # follower layer
+        for layer in self.modules[1:]:
+            
+            if layer.__class__ in modifier.follow:
+                f_modifier = self.config.follow[layer.__class__]
+                n_layer = f_modifier.identity(layer)
+                evolved.append(n_layer)
+
+            elif layer.__class__ in modifier.copy:
+                if isinstance(layer, ActiSwitch): # special case
+                    n_layer = layer.linear() if self.config.linear_start else layer.nonlinear()
+                    evolved.append(n_layer)
+                else:
+                    evolved.append(layer)
+
+        return EvolveBlock(evolved, self.config)
+    
+    def summary(self, i):
+        params = sum([param.numel() for param in self.modules[0].parameters()])
+        print(f"Layer {i+1:<4}{self.modules[0].__class__.__name__:<25}{params:<15}", end="")
+        
+        activation_printed = False
+        for layer in self.modules[1:]:
+            if isinstance(layer, ActiSwitch):
+                print(f"{layer.__class__.__name__}({layer.activation.__name__ if inspect.isfunction(layer.activation) else layer.activation.__class__.__name__}, {f'{100*(abs(layer.activation_weight.item())/(abs(layer.linear_weight.item())+abs(layer.activation_weight.item()))):.2f}':<6}%)")
+                activation_printed = True
+            else:
+                try:
+                    getattr(nn.modules.activation, layer.__class__.__name__)
+                    print(f"{layer.__class__.__name__}")
+                    activation_printed = True
+                except:
+                    pass
+        if not activation_printed:
+            print(f"No Activation")
 
 
 class DNA:
-    def __init__(self, input_size=None, default_activation=nn.ReLU()):
-        self.input_size: Tuple[int, int] = input_size
-        self.flatten: Flatten = None
-        self.conv: List[Tuple[Conv2D, ActiSwitch]] = []
-        self.maxpool: List[Tuple[int, MaxPool2D]] = []
-        self.linear: List[Tuple[Linear, ActiSwitch]] = []
-        self.default_activation: nn.ReLU = default_activation
+    '''
+    This class represents the DNA of a model, which is a sequence of `EvolveBlock` objects.
+    It is used to store and manipulate the model's architecture during evolution.
     
-    def append_conv(self, conv):
-        self.conv.append(conv)
+    Attributes:
+    -----------
+    - dna (List[EvolveBlock]): A list of `EvolveBlock` instances that make up the model.
+    - config (ATGENConfig): Configuration object that contains evolution parameters.
     
-    def append_linear(self, linear):
-        self.linear.append(linear)
-    
-    def append_maxpool(self, maxpool):
-        self.maxpool.append(maxpool)
+    Methods:
+    --------
+    - genes(): Returns the total number of parameters in the entire DNA sequence.
+    - __str__(): Returns a string representation of the DNA sequence, including the number of genes.
+    - reconstruct(): Reconstructs and returns the original `nn.Sequential` model from the DNA sequence.
+    - structure(): Returns a list of the class names of the layers in the DNA sequence.
+    - evolve_deeper(idx=None): Adds a new block in the DNA, increasing the model's depth.
+    - evolve_wider(idx=None, remove=None): Mutates a block by increasing or decreasing its width.
+    - evolve_weight(mutation_rate, perturbation_rate): Mutates the weights of the model by adding noise to some of the parameters, based on the mutation rate.
+    '''
+    def __init__(self, model: nn.Sequential, config: ATGENConfig):
+        '''GenoType'''
+        model = copy.deepcopy(model)
+        self.config = config
+
+        modules = EvolveBlock([], config)
+        self.dna: List[EvolveBlock] = []
+        for layer in model:
+            for layer_type in config.evolve.keys():
+                if isinstance(layer, layer_type):
+                    if modules.full():
+                        self.dna.append(modules)
+                    modules = EvolveBlock([], config)
+            modules.append(layer)
+        
+        if modules.full():
+            self.dna.append(modules)
+
+    def genes(self):
+        return sum([block.genes() for block in self.dna])
     
     def __str__(self) -> str:
-        return f'DNA Sequence:\n\tInput Size: {self.input_size}{f"\n\tConv: {len(self.conv)}" if self.conv else ""}{f"\n\tMaxPool: {len(self.maxpool)}" if self.maxpool else ""}{f"\n\tLinear: {len(self.linear)}" if self.linear else ""}'
+        return f'DNA Sequence: {len(self.dna)} evolve block of {self.genes()} genes'
     
-    def reconstruct(self):
-        layers = []
-        if self.conv:
-            for layer in self.conv:
-                layers.append(layer[0])
-                if isinstance(layer[1], ActiSwitch):
-                    layers.append(layer[1])
-        if self.maxpool:
-            for layer in self.maxpool:
-                layers.insert(*layer)
-        if self.flatten is not None:
-            layers.append(self.flatten)
-        if self.linear:
-            for layer in self.linear:
-                layers.append(layer[0])
-                if isinstance(layer[1], ActiSwitch):
-                    layers.append(layer[1])
-        
-        return layers
+    def reconstruct(self) -> nn.Sequential:
+        '''PhenoType'''
+        model = []
+        for block in self.dna:
+            for layer in block.modules:
+                model.append(layer)
+        model = nn.Sequential(*model)
+        return model
     
-    def linear_size(self):
-        return [layer[0].out_features for layer in self.linear]
+    def structure(self):
+        struct = ""
+        for block in self.dna:
+            struct += block.structure()
+        return hash(struct)
     
-    def conv_size(self):
-        return [layer[0].out_channels for layer in self.conv]
+    def new(self) -> nn.Sequential:
+        new = []
+        for block in self.dna:
+            new.extend(block.new())
+        model = nn.Sequential(*new)
+        return model
     
-    def rearrange(self):
-        if self.maxpool:
-            len_conv, len_maxpool = len(self.conv), len(self.maxpool)
-            gap = math.ceil(len_conv/len_maxpool)
+    @torch.no_grad()
+    def evolve_deeper(self, idx: int=None):
+        if self.dna:
+            idx = random.randint(0, len(self.dna)-1) if idx is None else idx
+            self.dna.insert(idx, self.dna[idx].identity())
+            
+            if (idx == (len(self.dna)-2)) and (self.config.default_activation is not None): # add activation function if copying last layer
+                if len(self.dna[-2].modules) > 1:
+                    self.dna[-2].modules.pop()
+                self.dna[-2].modules.append(self.config.default_activation)
 
-            for i in range(1, len_maxpool):
-                self.maxpool[i-1][0] = i * gap * 2 + (i - 1)
-            self.maxpool[-1][0] = len_conv * 2 +len_maxpool
-    
-    def evolve_linear_network(self, idx: int=None):
-        if self.linear:
-            idx = random.randint(0, len(self.linear)-1) if idx is None else idx
-            self.linear.insert(idx, [
-                Linear.init_identity_layer(self.linear[idx][0].in_features, True if self.linear[idx][0].bias is not None else False, self.linear[idx][0].norm_type), 
-                ActiSwitch(self.default_activation, True)
-            ])
-    
-    def evolve_conv_network(self, idx: int=None):
-        if self.conv:
-            idx = random.randint(0, len(self.conv)-1) if idx is None else idx
-            self.conv.insert(idx, [
-                Conv2D.init_identity_layer(self.conv[idx][0].in_channels, self.conv[idx][0].kernel_size, True if self.conv[idx][0].bias is not None else False, self.conv[idx][0].norm), 
-                ActiSwitch(self.default_activation, True)
-            ])
-    
-    def evolve_linear_layer(self, idx: int=None, remove=False):
-        if len(self.linear) > 1: # to avoid changing output layer shape
-            idx = random.randint(0, len(self.linear) - 2) if idx is None else idx
-            if not remove:
-                self.linear[idx][0].add_neuron()
-                if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
-                    self.linear[idx + 1][0].add_weight()
-            elif self.linear[idx][0].out_features > 1:
-                n_idx = random.randint(0, self.linear[idx][0].out_features-1)
-                self.linear[idx][0].remove_neuron(n_idx)
-                if idx < len(self.linear) - 1: # avoid out of range, this case handle crossover during the process of adding neuron to output layer
-                    self.linear[idx + 1][0].remove_weight(n_idx)
-        elif idx is not None: # handle if only 1 output layer in crossover
-            if not remove:
-                self.linear[idx][0].add_neuron()
-    
-    def evolve_conv_layer(self, idx: int=None, end_layer=False, remove=False):
-        if self.conv:
-            idx = random.randint(0, len(self.conv) - 1) if idx is None else idx
-            if not remove:
-                self.conv[idx][0].add_output_channel()
-                if idx < (len(self.conv) - 1): # handle transition from Conv to Linear in crossover
-                    self.conv[idx + 1][0].add_input_channel()
-                else:
-                    if not end_layer:
-                        size = int(self.linear[0][0].in_features/(self.conv[idx][0].out_channels-1))
-                        for _ in range(size):
-                            self.linear[0][0].add_weight()
-            elif self.conv[idx][0].out_channels > 1:
-                n_idx = random.randint(0, self.conv[idx][0].out_channels-1)
-                self.conv[idx][0].remove_output_channel(n_idx)
-                if idx < (len(self.conv) - 1): # handle transition from Conv to Linear
-                    self.conv[idx + 1][0].remove_input_channel(n_idx)
-                else:
-                    if not end_layer:
-                        size = int(self.linear[0][0].in_features/(self.conv[idx][0].out_channels+1))
-                        for i in range(size):
-                            self.linear[0][0].remove_weight(size*n_idx + i)
+    @torch.no_grad()
+    def evolve_wider(self, idx: int=None, remove: bool=None):
+        if remove is None:
+            remove = random.random() > 0.5 if self.config.remove_mutation else False
+            
+        if len(self.dna) > 1: # to avoid changing output layer shape
+            idx = random.randint(0, len(self.dna) - 2) if idx is None else idx
+            if self.dna[idx].mutate():
+                action_out = EvolveAction.DecreaseOut if remove else EvolveAction.IncreaseOut
+                action_in  = EvolveAction.DecreaseIn  if remove else EvolveAction.IncreaseIn
 
+                result = self.dna[idx].evolve(action_out)
+                if isinstance(result, bool):
+                    if result:
+                        self.dna[idx + 1].evolve(action_in)
+                else: # special case (conv->linear)
+                    repeat = int(self.dna[idx + 1].modules[0].weight.shape[1]/result)
+                    for _ in range(repeat):
+                        self.dna[idx + 1].evolve(action_in)
 
     @torch.no_grad()
     def evolve_weight(self, mutation_rate, perturbation_rate):
-        if self.conv:
-            for layer in self.conv:
-                for param in layer[0].parameters():
-                    if random.random() < mutation_rate:
-                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
-                        param.add_(noise)
-                for param in layer[1].parameters():
-                    if random.random() < mutation_rate:
-                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
-                        param.add_(noise)
-        if self.linear:
-            for layer in self.linear:
-                for param in layer[0].parameters():
-                    if random.random() < mutation_rate:
-                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
-                        param.add_(noise)
-                for param in layer[1].parameters():
-                    if random.random() < mutation_rate:
-                        noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
-                        param.add_(noise)
+        for param in [param for module in self.dna for layer in module for param in layer.parameters()]:
+            if param.requires_grad:
+                mask = torch.rand_like(param) < mutation_rate
+                noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                param.add_(mask * noise)
 
-    def evolve_activation(self, activation_dict: List[nn.Module]):
-        if self.conv:
-            idx = random.randint(0, len(self.conv)-1)
-            if isinstance(self.conv[idx][1], ActiSwitch):
-                self.conv[idx][1].change_activation(random.choice(activation_dict))
-        if len(self.linear) > 1:
-            idx = random.randint(0, len(self.linear)-2)
-            if isinstance(self.linear[idx][1], ActiSwitch):
-                self.linear[idx][1].change_activation(random.choice(activation_dict))
 
-    def prune(self, threshold: float = 0.01):
-        """
-        Prune neurons with weights below a given threshold.
-        
-        Args:
-            threshold (float): The threshold below which neurons will be pruned.
-        """
-        for i, layer in enumerate(self.linear[:-1]):
-            if layer[0].out_features > 1:
-                # Identify neurons to prune
-                neurons_to_prune = []
-                for neuron_idx in range(layer[0].out_features):
-                    neuron_weights = layer[0].weight[neuron_idx].abs()
-                    if torch.max(neuron_weights) < threshold:
-                        neurons_to_prune.append(neuron_idx)
-                
-                for neuron_idx in reversed(neurons_to_prune):
-                    if layer[0].out_features > 1:
-                        layer[0].remove_neuron(neuron_idx)
-                        self.linear[i + 1][0].remove_weight(neuron_idx)
+    @torch.no_grad()
+    def summary(self):
+        print(f"{BOLD}{BLUE}Model Summary{RESET_COLOR}{BOLD}:")
+        print("-" * 80)
+        print(f"{'Layer':<10}{'Type':<25}{'Parameters':<15}{'Activation':<15}")
+        print("-" * 80)
 
-        for i, layer in enumerate(self.conv[:-1]):
-            if layer[0].out_channels > 1:
-                # Identify filters to prune
-                filters_to_prune = []
-                for neuron_idx in range(layer[0].out_channels):
-                    neuron_weights = layer[0].weight[neuron_idx].abs()
-                    if torch.max(neuron_weights) < threshold:
-                        filters_to_prune.append(neuron_idx)
-                
-                for neuron_idx in reversed(filters_to_prune):
-                    if layer[0].out_channels > 1:
-                        layer[0].remove_output_channel(neuron_idx)
-                        self.conv[i + 1][0].remove_input_channel(neuron_idx)
+        for i, block in enumerate(self.dna):
+            block.summary(i)
+
+        print("-" * 80)
+        print(f"{BLUE}{'Total Parameters:':<35}{RESET_COLOR}{BOLD}{self.genes():,}{RESET_COLOR}")
+
     
-    
+if __name__ == "__main__":
+    model = nn.Sequential(
+        nn.Conv2d(3, 32, 3, 1, 1),
+        nn.BatchNorm2d(32),
+        nn.ReLU(),
+        nn.MaxPool2d(2, 2),
+        nn.Conv2d(32, 32, 3, 1, 1),
+        nn.BatchNorm2d(32),
+        nn.ReLU(),
+        nn.MaxPool2d(2, 2),
+        nn.Flatten(),
+        nn.LazyLinear(1),
+        nn.Softmax(-1)
+    )
+    model(torch.rand(64, 3, 32, 32))
+
+    dna = DNA(model, ATGENConfig())
+    dna.summary()
+    # dna.evolve_deeper()
+    print(model)
+    print(dna)
+    dna.evolve_wider()
+    # for block in dna.dna:
+    #     print(block.modules)
+    print(dna)
+    model = dna.reconstruct()
+    print(model)
+    print(model[0].weight.shape)
+    model(torch.rand(64, 3, 32, 32))
+
+
+    model = nn.Sequential(
+        nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, stride=2, padding=1),  # 28x28 -> 14x14
+        nn.ReLU(True),
+        nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=2, padding=1), # 14x14 -> 7x7
+        nn.ReLU(True),
+        nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1), # 7x7 -> 4x4
+        nn.ReLU(True),
+        nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=3, stride=2, padding=1, output_padding=1), # 4x4 -> 7x7
+        nn.ReLU(True),
+        nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=3, stride=2, padding=1, output_padding=1), # 7x7 -> 14x14
+        nn.ReLU(True),
+        nn.ConvTranspose2d(in_channels=16, out_channels=1, kernel_size=3, stride=2, padding=1, output_padding=1),  # 14x14 -> 28x28
+        nn.Sigmoid()
+    )
+
+    data_in = torch.rand(64, 1, 28, 28)
+    data_out = model(data_in)
+    print(data_out.shape)
+
+    dna = DNA(model, ATGENConfig())
+    dna.evolve_deeper()
+    dna.evolve_wider()
+    dna.evolve_deeper()
+    dna.evolve_wider()
+
+    model = dna.reconstruct()
+    dna.summary()
+    print(dna.structure())
+    print(model)
+    data_out = model(data_in)
+    print(data_out.shape)
 
