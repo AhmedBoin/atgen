@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 
@@ -91,3 +92,6 @@ print(layer.weight.shape, layer.bias.shape)
 print(hash("Conv2dConv2dConv2dConvTranspose2dConvTranspose2dConvTranspose2dConvTranspose2dConvTranspose2d"))
 print(hash("loll"))
 print(hash("Hi"))
+
+x = [1, 2, 3]
+print(x[:-1])

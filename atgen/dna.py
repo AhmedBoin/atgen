@@ -66,12 +66,19 @@ class EvolveBlock:
             kind = kind[4:]
         return kind
     
-    def new(self) -> "EvolveBlock":
+    def new(self) -> List[nn.Module]:
         new = []
         modifier = self.config.evolve[self.modules[0].__class__]
-        new.append(modifier.new(self.modules[0]))
-        new.extend(self.modules[1:])
+        new.append(copy.deepcopy(modifier.new(self.modules[0])))
+        new.extend(copy.deepcopy(self.modules[1:]))
         return new
+    
+    def size(self) -> int:
+        modifier = self.config.evolve[self.modules[0].__class__]
+        layer, _ = modifier.modify(self.modules[0], EvolveAction.IncreaseOut)
+        after = sum([param.numel() for param in layer.parameters()])
+        before = sum([param.numel() for param in self.modules[0].parameters()])
+        return int(before/(after-before))
 
     def evolve(self, action: str) -> Union[bool, int]:
         evolved = []
@@ -117,8 +124,7 @@ class EvolveBlock:
 
             elif layer.__class__ in modifier.copy:
                 if isinstance(layer, ActiSwitch): # special case
-                    n_layer = layer.linear() if self.config.linear_start else layer.nonlinear()
-                    evolved.append(n_layer)
+                    evolved.append(ActiSwitch(layer.activation, self.config.linear_start))
                 else:
                     evolved.append(layer)
 
@@ -210,6 +216,12 @@ class DNA:
         model = nn.Sequential(*new)
         return model
     
+    def population(self, size, device="cpu"):
+        return [self.new().to(device) for _ in size]
+    
+    def size(self) -> List[int]:
+        return [block.size() for block in self.dna]
+    
     @torch.no_grad()
     def evolve_deeper(self, idx: int=None):
         if self.dna:
@@ -249,6 +261,27 @@ class DNA:
                 noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
                 param.add_(mask * noise)
 
+    @torch.no_grad()
+    def __add__(self, RNA: "DNA"):
+        '''Crossover'''
+        dna = copy.deepcopy(self)
+        rna = copy.deepcopy(self)
+        if dna.structure() == rna.structure():
+            dna_size, rna_size = _sizes(dna.size()[:-1], rna.size()[:-1])
+            for i, (t, a) in enumerate(dna_size):
+                for _ in range(t):
+                    dna.evolve_wider(i, a)
+            for i, (t, a) in enumerate(rna_size):
+                for _ in range(t):
+                    rna.evolve_wider(i, a)
+            dna, rna = dna.reconstruct(), rna.reconstruct()
+            for param1, param2 in zip(dna.parameters(), rna.parameters()):
+                mask = torch.rand_like(param1.data) > 0.5
+                param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+            return DNA(dna, self.config), DNA(rna, self.config)
+        else:
+            raise Exception("DNA structure is not in the same Species")
+
 
     @torch.no_grad()
     def summary(self):
@@ -264,6 +297,13 @@ class DNA:
         print(f"{BLUE}{'Total Parameters:':<35}{RESET_COLOR}{BOLD}{self.genes():,}{RESET_COLOR}")
 
     
+# helper crossover function
+def _sizes(list1: List[int], list2: List[int]):
+    offspring =  [random.randint(min(a, b), max(a, b)) for a, b in zip(list1, list2)]
+    parent1 = [(o-i, True) if o>i else (i-o, False) for o, i in zip(offspring, list1)]
+    parent2 = [(o-i, True) if o>i else (i-o, False) for o, i in zip(offspring, list2)]
+    return parent1, parent2
+
 if __name__ == "__main__":
     model = nn.Sequential(
         nn.Conv2d(3, 32, 3, 1, 1),
@@ -326,4 +366,9 @@ if __name__ == "__main__":
     print(model)
     data_out = model(data_in)
     print(data_out.shape)
+
+    model2 = dna.new()
+    model3 = dna.new()
+    print(model2[-2].parameters())
+    print(model3[-2].parameters())
 

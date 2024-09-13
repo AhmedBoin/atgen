@@ -7,17 +7,18 @@ from layers import ActiSwitch, LayerModifier
 from utils import evolve, follow, copy, skip
 
 class ATGENConfig:
-    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, 
+    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, single_offspring=True,
                  mutation_rate=0.1, perturbation_rate=0.9, mutation_decay=1.0, min_mutation=0.001, wider_mutation=0.01, 
-                 deeper_mutation=0.0001, threshold=0.01, default_activation=ActiSwitch(nn.ReLU()), 
-                 dynamic_dropout_population=True, parents_mutate=True, remove_mutation=True, linear_start=True, 
-                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None):
+                 deeper_mutation=0.0001, threshold=0.01, default_activation=ActiSwitch(nn.ReLU()), shared_fitness=True,
+                 dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True, 
+                 save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None):
 
         # Crossover setting
         self.crossover_rate = crossover_rate
         self.crossover_decay = crossover_decay
         self.min_crossover = min_crossover
         self.dynamic_dropout_population = dynamic_dropout_population
+        self.single_offspring = single_offspring
 
         # Mutation setting
         self.mutation_rate = mutation_rate
@@ -25,10 +26,13 @@ class ATGENConfig:
         self.mutation_decay = mutation_decay
         self.min_mutation = min_mutation
         # Extra Mutation setting
-        self.parents_mutate = parents_mutate
+        self.parent_mutation = parent_mutation
         self.wider_mutation = wider_mutation
         self.deeper_mutation = deeper_mutation
         self.remove_mutation = remove_mutation
+
+        self.shared_fitness = shared_fitness
+        self.save_every_generation = save_every_generation
 
         # Network setting
         self.threshold = threshold
@@ -86,7 +90,7 @@ class ATGENConfig:
             'min_mutation': self.min_mutation,
             'wider_mutation': self.wider_mutation,
             'deeper_mutation': self.deeper_mutation,
-            'parents_mutate': self.parents_mutate,
+            'parent_mutation': self.parent_mutation,
             'remove_mutation': self.remove_mutation,
             'threshold': self.threshold,
             'actiswitch': actiswitch,
@@ -123,7 +127,7 @@ class ATGENConfig:
             min_mutation=config_data['min_mutation'],
             wider_mutation=config_data['wider_mutation'],
             deeper_mutation=config_data['deeper_mutation'],
-            parents_mutate=config_data['parents_mutate'],
+            parent_mutation=config_data['parent_mutation'],
             remove_mutation=config_data['remove_mutation'],
             threshold=config_data['threshold'],
             default_activation=default_activation,

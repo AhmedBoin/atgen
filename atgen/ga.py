@@ -1,3 +1,4 @@
+import math
 import numpy
 import torch
 from torch import nn
@@ -9,13 +10,12 @@ import matplotlib.pyplot as plt
 import inspect
 import copy
 import random
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 import pickle
 
-from network import ATNetwork
-from layers import Linear, Conv2D, LazyConv2D, MaxPool2D, Flatten, ActiSwitch, Pass, LazyLinear
+from layers import ActiSwitch
 from dna import DNA
-from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, activation_functions, print_stats_table
+from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
 from config import ATGENConfig
 
 
@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN(nn.Module):
-    def __init__(self, population_size: int, layers: List[int], config=ATGENConfig(), device="cpu"):
+    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), device="cpu"):
         """
         Initialize the Genetic Algorithm for evolving neural networks.
 
@@ -41,20 +41,16 @@ class ATGEN(nn.Module):
         """
         self.population_size = population_size
         self.config = config
-        self.crossover_rate = int((1-self.config.crossover_rate)*population_size)
+        self.metrics = 0
         
         # Initialize the population
-        self.population = [
-            ATNetwork(
-                *layers, 
-                activation=self.config.default_activation, 
-                last_activation=self.config.last_activation, 
-                bias=self.config.bias, 
-                input_size=self.config.input_size
-            ).to(device) for _ in range(population_size)
-        ]
+        dna = DNA(network, config)
+        self.population = [dna.new().to(device) for _ in range(population_size)]
+        self.species: Dict[int, List[nn.Sequential]] = {dna.structure(): self.population}
         self.fitness_scores = [0.0] * population_size
-        self.selection_probs = self.fitness_scores
+        self.group_size = [population_size] * population_size
+        self.shared_fitness = copy.deepcopy(self.fitness_scores)
+        self.selection_probs = copy.deepcopy(self.fitness_scores)
         self.best_fitness = float("-inf")
         self.last_fitness = float("-inf")
 
@@ -64,9 +60,11 @@ class ATGEN(nn.Module):
         Evaluate the fitness of each network in the population.
         """
         self.fitness_scores = [0.0] * len(self.population)
+        self.shared_fitness = [0.0] * len(self.population)
 
         for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100)):
             self.fitness_scores[i] = self.fitness_fn(network)
+            self.shared_fitness[i] = self.fitness_scores[i] / self.group_size[i]
         
         # args = [(i, network, self.fitness_fn) for i, network in enumerate(self.population)]
         # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
@@ -91,13 +89,13 @@ class ATGEN(nn.Module):
         Returns:
             Tuple[DNA, DNA]: Two selected parent networks.
         """
-        parent1 = random.choices(self.population, weights=self.selection_probs, k=1)[0].genotype()
-        parent2 = random.choices(self.population, weights=self.selection_probs, k=1)[0].genotype()
+        parent1 = DNA(random.choices(self.population, weights=self.selection_probs, k=1)[0], self.config)
+        parent2 = DNA(random.choices(self.population, weights=self.selection_probs, k=1)[0], self.config)
         
         return parent1, parent2
 
     @torch.no_grad()
-    def crossover(self, parent1: DNA, parent2: DNA) -> DNA:
+    def crossover(self, parent1: DNA, parent2: DNA) -> Tuple[DNA, DNA]:
         """
         Perform a more vectorized crossover between two parent networks to produce a offspring network.
         
@@ -108,92 +106,9 @@ class ATGEN(nn.Module):
         Returns:
             DNA: A new offspring network created from crossover.
         """
-        parent1 = copy.deepcopy(parent1)
-        parent2 = copy.deepcopy(parent2)
-        offspring = copy.deepcopy(parent1)
-        modifier = copy.deepcopy(parent2)
-        
-        # Evolve layers to match neuron counts for crossover
-        for i, (i1, i2) in enumerate(zip(parent1.conv_size(), parent2.conv_size())):
-            if i1 < i2:
-                for _ in range(i2 - i1):
-                    parent1.evolve_conv_layer(i, True)
-            elif i2 < i1:
-                for _ in range(i1 - i2):
-                    parent2.evolve_conv_layer(i, True)
-                    
-        for i, (i1, i2) in enumerate(zip(parent1.linear_size(), parent2.linear_size())):
-            if i1 < i2:
-                for _ in range(i2 - i1):
-                    parent1.evolve_linear_layer(i)
-            elif i2 < i1:
-                for _ in range(i1 - i2):
-                    parent2.evolve_linear_layer(i)
+        offspring1, offspring2 = parent1 + parent1
 
-        # Determine final offspring layer sizes
-        if len(parent1.conv) > len(parent2.conv):
-            offspring.conv, modifier.conv = parent1.conv, parent2.conv
-        else:
-            offspring.conv, modifier.conv = parent2.conv, parent1.conv
-
-        if len(parent1.linear) > len(parent2.linear):
-            offspring.linear, modifier.linear = parent1.linear, parent2.linear
-        else:
-            offspring.linear, modifier.linear = parent2.linear, parent1.linear
-
-        # crossover conv layers
-        for idx in range(len(modifier.conv)):
-            weight1 = offspring.conv[idx][0].weight
-            weight2 = modifier.conv[idx][0].weight
-            bias1 = offspring.conv[idx][0].bias if offspring.conv[idx][0].bias is not None else None
-            bias2 = modifier.conv[idx][0].bias if modifier.conv[idx][0].bias is not None else None
-
-            # Apply random mask to weights and biases for crossover
-            mask = torch.rand_like(weight1, device=weight1.device) < 0.5
-            offspring_layer_weight = torch.where(mask, weight1, weight2)
-                
-            if bias1 is not None and bias2 is not None:
-                mask = torch.rand_like(bias1, device=weight1.device) < 0.5
-                offspring_layer_bias = torch.where(mask, bias1, bias2)
-            else:
-                offspring_layer_bias = bias1 if bias1 is not None else bias2
-
-            offspring.conv[idx][0].weight.data.copy_(offspring_layer_weight)
-            if offspring_layer_bias is not None:
-                offspring.conv[idx][0].bias.data.copy_(offspring_layer_bias)
-
-            # Crossover activation function
-            offspring.conv[idx][1].activation = offspring.conv[idx][1].activation if random.random() < 0.5 else modifier.conv[idx][1].activation
-
-        # adjust maxpool positions
-        offspring.rearrange()
-            
-        # crossover linear layers
-        for idx in range(len(modifier.linear)):
-            weight1 = offspring.linear[idx][0].weight
-            weight2 = modifier.linear[idx][0].weight
-            bias1 = offspring.linear[idx][0].bias if offspring.linear[idx][0].bias is not None else None
-            bias2 = modifier.linear[idx][0].bias if modifier.linear[idx][0].bias is not None else None
-
-            # Apply random mask to weights and biases for crossover
-            mask = torch.rand_like(weight1, device=weight1.device) < 0.5
-            offspring_layer_weight = torch.where(mask, weight1, weight2)
-                
-            if bias1 is not None and bias2 is not None:
-                mask = torch.rand_like(bias1, device=weight1.device) < 0.5
-                offspring_layer_bias = torch.where(mask, bias1, bias2)
-            else:
-                offspring_layer_bias = bias1 if bias1 is not None else bias2
-
-            offspring.linear[idx][0].weight.data.copy_(offspring_layer_weight)
-            if offspring_layer_bias is not None:
-                offspring.linear[idx][0].bias.data.copy_(offspring_layer_bias)
-
-            # Crossover activation function
-            if idx != len(modifier.linear)-1:
-                offspring.linear[idx][1] = offspring.linear[idx][1] if random.random() < 0.5 else modifier.linear[idx][1]
-
-        return offspring
+        return offspring1, offspring2
 
     @torch.no_grad()
     def mutate(self, network: DNA):
@@ -203,27 +118,25 @@ class ATGEN(nn.Module):
         Args:
             network (DNA): The network to mutate.
         """
-        if random.random() < self.config.linear_mutation_rate:
-            network.evolve_linear_network()
-        if random.random() < self.config.conv_mutation_rate:
-            network.evolve_conv_network()
-        if random.random() < self.config.neuron_mutation_rate:
-            network.evolve_linear_layer(remove=self.config.remove)
-        if random.random() < self.config.filter_mutation_rate:
-            network.evolve_conv_layer(remove=self.config.remove)
-        if random.random() < self.config.activation_mutation_rate:
-            network.evolve_activation(self.config.activation_dict)
-        network.evolve_weight(self.config.weight_mutation_rate, self.config.perturbation_rate)
+        if random.random() < self.config.deeper_mutation:
+            network.evolve_deeper()
+        if random.random() < self.config.wider_mutation:
+            network.evolve_wider()
+        network.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
 
                 
-    def run_generation(self, metrics: int=0) -> float:
+    def run_generation(self) -> Tuple[float, float, float]:
         """
         Run a single generation of the genetic algorithm, including evaluation, selection, crossover, mutation, and pruning.
         
         Args:
             fitness_fn (function): A function to evaluate the fitness of a network.
         """
+
+        # Set generation size:
+        crossover_size = int((1-self.config.crossover_rate)*self.population_size) if self.config.dynamic_dropout_population else self.population_size//2
         
+        # Evaluate the fitness of each network
         self.evaluate_fitness()
 
         # preview training data
@@ -231,35 +144,78 @@ class ATGEN(nn.Module):
         min_fitness = min(self.fitness_scores)
         mean_fitness = numpy.mean(self.fitness_scores)
         all_fitness = [max_fitness, mean_fitness, mean_fitness]
-        color = GREEN if all_fitness[metrics] > self.best_fitness else GRAY if all_fitness[metrics] > self.last_fitness else RED
-        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ all_fitness[metrics] }{RESET_COLOR}"
-        self.last_fitness = all_fitness[metrics] 
-        if all_fitness[metrics] > self.best_fitness: 
-            self.best_fitness = all_fitness[metrics]
+        color = GREEN if all_fitness[self.metrics] > self.best_fitness else GRAY if all_fitness[self.metrics] > self.last_fitness else RED
+        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ all_fitness[self.metrics] }{RESET_COLOR}"
+        self.last_fitness = all_fitness[self.metrics] 
+        if all_fitness[self.metrics] > self.best_fitness: 
+            self.best_fitness = all_fitness[self.metrics]
+
+        # select sorting type
+        fitness_score = self.shared_fitness if self.config.shared_fitness else self.fitness_scores
 
         # selection of parents
-        fits = sorted([fit for fit in self.fitness_scores], reverse=True)[:self.crossover_rate]
+        fits = sorted([fit for fit in fitness_score], reverse=True)[:crossover_size]
         min_fit = min(fits)
         fits = [fit-min_fit for fit in fits] # make all positive numbers
         total_fitness = sum(fits)
         self.selection_probs = [score / total_fitness for score in fits] # convert to probabilities
         
-        sorted_population = [ind for _, ind in sorted(zip(self.fitness_scores, self.population), key=lambda x: x[0], reverse=True)]
-        self.population = sorted_population[:self.crossover_rate]  # Select top 50%
+        sorted_population = [ind for _, ind in sorted(zip(fitness_score, self.population), key=lambda x: x[0], reverse=True)]
+        self.population = sorted_population[:crossover_size]  # Select top percent
         
-        new_population: List[ATNetwork] = []
-        for _ in tqdm(range(self.population_size-self.crossover_rate), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
-            parent1, parent2 = self.select_parents()
-            offspring = self.crossover(parent1, parent2)
-            self.mutate(offspring)
-            offspring = ATNetwork.phenotype(offspring)
-            new_population.append(offspring)
-        self.population.extend(new_population)
+        # offsprings generation
+        offsprings = []
+        if self.config.single_offspring:
+            repeat = self.population_size-crossover_size
+            for _ in tqdm(range(repeat), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
+                parent1, parent2 = self.select_parents()
+                offspring = self.crossover(parent1, parent2)[0]
+                self.mutate(offspring)
+                offspring = offspring.reconstruct()
+                offsprings.append(offspring)
+        else:
+            for _ in tqdm(range(math.ceil(repeat/2)), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
+                parent1, parent2 = self.select_parents()
+                offspring1, offspring2 = self.crossover(parent1, parent2)
+                self.mutate(offspring1)
+                self.mutate(offspring2)
+                offspring1 = offspring1.reconstruct()
+                offspring2 = offspring2.reconstruct()
+                offsprings.append(offspring1)
+                offsprings.append(offspring2)
+            if (repeat%2) == 1:
+                offsprings.pop()
 
+        # mutate parents
+        if self.config.parent_mutation:
+            parents = []
+            for individual in self.population:
+                individual = DNA(individual, self.config)
+                self.mutate(individual)
+                parents.append(individual.reconstruct())
+            self.population = parents + offsprings
+        else:
+            self.population.extend(offsprings)
+
+        # species individual into subgroups
+        self.species = {}
+        for individual in self.population:
+            individual_id = DNA(individual, self.config).structure()
+            if individual in self.species:
+                self.species[individual_id].append(individual)
+            else:
+                self.species[individual_id] = [individual]
+                
+        for i, individual in enumerate(self.population):
+            for key in self.species.keys():
+                if DNA(individual, self.config).structure() == key:
+                    self.group_size[i] = len(self.species[key])
+                    break
+
+        # results
         print(print_current_best)
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
-        self.population[0].summary()
-
+        DNA(self.population[0], self.config).summary()
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
@@ -269,17 +225,24 @@ class ATGEN(nn.Module):
         if self.is_overridden("backprob_fn"):
             self.evaluate_learn()
 
-        print_stats_table(self.best_fitness, metrics, max_fitness, mean_fitness, min_fitness, self.population_size)
-        self.save_population()
+        # config modification
+        print_stats_table(self.best_fitness, self.metrics, max_fitness, mean_fitness, min_fitness, self.population_size, len(self.species))
+        self.config.crossover_step()
+        self.config.mutation_step()
+        if self.config.save_every_generation and self.save_name is not None:
+            self.save_population(self.save_name)
+
         return max_fitness, mean_fitness, min_fitness
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
+        self.metrics = metrics
+        self.save_name = save_name
         last_fitness = -float("inf")
         maximum, mean, minimum = [], [], []
         if generation is not None:
                 for i in range(generation):
                     print(f"\n--- {BLUE}Generation {i+1}{RESET_COLOR} ---")
-                    results = self.run_generation(metrics)
+                    results = self.run_generation()
                     maximum.append(results[0])
                     mean.append(results[1])
                     minimum.append(results[2])
@@ -294,7 +257,7 @@ class ATGEN(nn.Module):
             while fitness > last_fitness:
                 generation += 1
                 print(f"\n--- {BLUE}Generation {generation}{RESET_COLOR} ---")
-                results = self.run_generation(metrics)
+                results = self.run_generation()
                 maximum.append(results[0])
                 mean.append(results[1])
                 minimum.append(results[2])
@@ -304,8 +267,12 @@ class ATGEN(nn.Module):
         else:
             raise ValueError("evolve using generation number or fitness value")
         
+        # rearrange
+        self.evaluate_fitness()
+        self.population = [ind for _, ind in sorted(zip(self.shared_fitness, self.population), key=lambda x: x[0], reverse=True)]
+        
         if save_name is not None:
-            self.population[0].save_network(save_name)
+            self.save_population(save_name)
         
         if plot:
             plt.plot(range(len(mean)), mean, label='Mean Fitness')
@@ -371,59 +338,63 @@ def refine_genome(args):
     
 if __name__ == "__main__":
     # Initialize the ATGEN instance
-    ga = ATGEN(population_size=10, layers=[8, 1, 4])
+    model = nn.Sequential(
+        nn.Linear(8, 4),
+        nn.ReLU(),
+        nn.Linear(4, 1)
+    )
+    ga = ATGEN(population_size=10, network=model)
     
     # Create parent networks with specified architectures
-    parent1 = ATNetwork(10, 2, 5, 1)
-    parent2 = ATNetwork(10, 2, 4, 3, 1)
+    parent1 = DNA(ga.population[0], ATGENConfig())
+    parent2 = DNA(ga.population[1], ATGENConfig())
     
     # Perform crossover
-    offspring = ga.crossover(parent1.genotype(), parent2.genotype())
-    offspring = ATNetwork.phenotype(offspring)
-    offspring.summary()
+    offspring1 = ga.crossover(parent1, parent2)[0]
+    offspring1.summary()
     
-    # Create CNN parent networks
-    parent1 = ATNetwork(
-        Conv2D(3, 32),
-        ActiSwitch(nn.ReLU()),
-        MaxPool2D(),
-        Conv2D(32, 64),
-        ActiSwitch(nn.ReLU()),
-        MaxPool2D(),
-        Flatten(),
-        LazyLinear(100),
-        ActiSwitch(nn.ReLU()),
-        Linear(100, 10),
-        input_size=(32, 32)
-    )
-    parent2 = ATNetwork(
-        Conv2D(3, 32),
-        ActiSwitch(nn.ReLU()),
-        MaxPool2D(),
-        Conv2D(32, 64),
-        ActiSwitch(nn.ReLU()),
-        Conv2D(64, 64),
-        ActiSwitch(nn.ReLU()),
-        MaxPool2D(),
-        Flatten(),
-        LazyLinear(200),
-        ActiSwitch(nn.ReLU()),
-        Linear(200, 100),
-        ActiSwitch(nn.ReLU()),
-        Linear(100, 10),
-        input_size=(32, 32)
-    )
-    parent1.summary()
-    parent2.summary()
-    # summary(parent1, (3, 32, 32), device="cpu")
-    # summary(parent2, (3, 32, 32), device="cpu")
+    # # Create CNN parent networks
+    # parent1 = ATNetwork(
+    #     Conv2D(3, 32),
+    #     ActiSwitch(nn.ReLU()),
+    #     MaxPool2D(),
+    #     Conv2D(32, 64),
+    #     ActiSwitch(nn.ReLU()),
+    #     MaxPool2D(),
+    #     Flatten(),
+    #     LazyLinear(100),
+    #     ActiSwitch(nn.ReLU()),
+    #     Linear(100, 10),
+    #     input_size=(32, 32)
+    # )
+    # parent2 = ATNetwork(
+    #     Conv2D(3, 32),
+    #     ActiSwitch(nn.ReLU()),
+    #     MaxPool2D(),
+    #     Conv2D(32, 64),
+    #     ActiSwitch(nn.ReLU()),
+    #     Conv2D(64, 64),
+    #     ActiSwitch(nn.ReLU()),
+    #     MaxPool2D(),
+    #     Flatten(),
+    #     LazyLinear(200),
+    #     ActiSwitch(nn.ReLU()),
+    #     Linear(200, 100),
+    #     ActiSwitch(nn.ReLU()),
+    #     Linear(100, 10),
+    #     input_size=(32, 32)
+    # )
+    # parent1.summary()
+    # parent2.summary()
+    # # summary(parent1, (3, 32, 32), device="cpu")
+    # # summary(parent2, (3, 32, 32), device="cpu")
     
-    # Perform crossover
-    parent2 = parent2.genotype()
-    print(len(parent2.conv))
-    parent2.evolve_conv_layer(1)
-    offspring = ga.crossover(parent1.genotype(), parent2)
-    offspring = ATNetwork.phenotype(offspring)
-    offspring.summary()
-    # summary(offspring, (3, 32, 32), device="cpu")
+    # # Perform crossover
+    # parent2 = parent2.genotype()
+    # print(len(parent2.conv))
+    # parent2.evolve_conv_layer(1)
+    # offspring = ga.crossover(parent1.genotype(), parent2)
+    # offspring = ATNetwork.phenotype(offspring)
+    # offspring.summary()
+    # # summary(offspring, (3, 32, 32), device="cpu")
 

@@ -1,10 +1,9 @@
 import random
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 
-from atgen.layers.activations import Pass
-from atgen.network import ATNetwork
 from atgen.ga import ATGEN
 from atgen.config import ATGENConfig
 
@@ -16,11 +15,11 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
-    def __init__(self, population_size: int, layers: F.List[int]):
-        super().__init__(population_size, layers, ATGENConfig(last_mutation_rate=0.01, neuron_mutation_rate=0.02))
+    def __init__(self, population_size: int, model: nn.Sequential):
+        super().__init__(population_size, model)
 
-    def fitness_fn(self, model: ATNetwork):
-        epochs = 3
+    def fitness_fn(self, model: nn.Sequential):
+        epochs = 5
         env = gym.make("LunarLander-v2")
         total_reward = 0
         for _ in range(epochs):
@@ -109,16 +108,17 @@ class NeuroEvolution(ATGEN):
     #         #     optimizer = AdamW(model.parameters(), lr=1e-1)
 
 if __name__ == "__main__":
-    ne = NeuroEvolution(1000, [8, 4])
+    model = nn.Sequential(nn.Linear(8, 4))
+    ne = NeuroEvolution(100, model)
     ne.load_population()
-    # ne.evolve(fitness=280, save_name="ATNetwork.pth", metrics=0, plot=True)
+    ne.evolve(fitness=285, save_name="population.pkl", metrics=0, plot=True)
     
     # model = ATNetwork.load_network()
-    model = ne.population[1]
-    # env = gym.make("LunarLander-v2", render_mode="human")
+    model = ne.population[0]
+    env = gym.make("LunarLander-v2", render_mode="human")
     while True:
-        # for i, model in enumerate(ne.population[:ne.crossover_rate]):
-            env = gym.make("LunarLander-v2", render_mode="human")
+        # for i, model in enumerate(ne.population):
+            # env = gym.make("LunarLander-v2", render_mode="human")
             state, info = env.reset()
             total_reward = 0
             while True:
