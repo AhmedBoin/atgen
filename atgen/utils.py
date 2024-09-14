@@ -1,5 +1,6 @@
 
-from typing import Dict
+import math
+from typing import Dict, List, Tuple
 import torch.nn as nn
 from torch.nn import init
 
@@ -135,4 +136,25 @@ def print_stats_table(best, metrics, fitness, population, species=1):
     table = [[best, met[metrics], fitness[0], fitness[1], fitness[2], population, species]]
     print(tabulate(table, headers, tablefmt="fancy_grid"))
 
+
+
+def merge_dicts(dict1: Dict[int, List[Tuple[nn.Sequential, float]]], dict2: Dict[int, List[Tuple[nn.Sequential, float]]]):
+    for key, value in dict2.items():
+        if key in dict1:
+            dict1[key].extend(value)
+        else:
+            dict1[key] = value
+    return dict1
+
+def shift_to_positive(arr):
+    min_val = min(arr)
+    if min_val < 0:
+        shift = abs(min_val) + 1  # Add a buffer of 1 to avoid zero
+        return [x + shift for x in arr]
+    return arr
+
+def log_level(val, level):
+    for _ in range(level):
+        val = math.log2(val+1)
+    return val
 

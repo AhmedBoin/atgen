@@ -51,8 +51,7 @@ class EvolveBlock:
         return sum([param.numel() for module in self.modules for param in module.parameters()])
     
     def mutate(self):
-        for param in self.modules[0].parameters():
-            return param.requires_grad
+        return self.modules[0].parameters().__next__().requires_grad
         
     def __iter__(self):
         return iter(self.modules)
@@ -70,10 +69,13 @@ class EvolveBlock:
             return str(self.genes())
     
     def new(self) -> List[nn.Module]:
-        new = []
+        new: List[nn.Module] = []
         modifier = self.config.evolve[self.modules[0].__class__]
         new.append(copy.deepcopy(modifier.new(self.modules[0])))
         new.extend(copy.deepcopy(self.modules[1:]))
+        for new_layer, layer in zip(new, self.modules):
+            for new_param, param in zip(new_layer.parameters(), layer.parameters()):
+                new_param.requires_grad = param.requires_grad
         return new
     
     def size(self) -> int:
@@ -177,6 +179,7 @@ class DNA:
         '''GenoType'''
         model = copy.deepcopy(model)
         self.config = config
+        self.device = model.parameters().__next__().device
 
         modules = EvolveBlock([], config)
         self.dna: List[EvolveBlock] = []
@@ -203,7 +206,7 @@ class DNA:
         for block in self.dna:
             for layer in block.modules:
                 model.append(layer)
-        model = nn.Sequential(*model)
+        model = nn.Sequential(*model).to(self.device)
         return model
     
     def structure(self):
@@ -216,11 +219,11 @@ class DNA:
         new = []
         for block in self.dna:
             new.extend(block.new())
-        model = nn.Sequential(*new)
+        model = nn.Sequential(*new).to(self.device)
         return copy.deepcopy(model)
     
-    def population(self, size, device="cpu"):
-        return [self.new().to(device) for _ in size]
+    def population(self, size):
+        return [self.new().to(self.device) for _ in size]
     
     def size(self) -> List[int]:
         return [block.size() for block in self.dna]
@@ -229,12 +232,13 @@ class DNA:
     def evolve_deeper(self, idx: int=None):
         if self.dna:
             idx = random.randint(0, len(self.dna)-1) if idx is None else idx
-            self.dna.insert(idx, self.dna[idx].identity())
-            
-            if (idx == (len(self.dna)-2)) and (self.config.default_activation is not None): # add activation function if copying last layer
-                if len(self.dna[-2].modules) > 1:
-                    self.dna[-2].modules.pop()
-                self.dna[-2].modules.append(self.config.default_activation)
+            if self.dna[idx].mutate():
+                self.dna.insert(idx, self.dna[idx].identity())
+                
+                if (idx == (len(self.dna)-2)) and (self.config.default_activation is not None): # add activation function if copying last layer
+                    if len(self.dna[-2].modules) > 1:
+                        self.dna[-2].modules.pop()
+                    self.dna[-2].modules.append(self.config.default_activation)
 
     @torch.no_grad()
     def evolve_wider(self, idx: int=None, remove: bool=None):
@@ -261,7 +265,7 @@ class DNA:
         for param in [param for module in self.dna for layer in module for param in layer.parameters()]:
             if param.requires_grad:
                 mask = torch.rand_like(param) < mutation_rate
-                noise = torch.randn_like(param) * perturbation_rate  # Adjust perturbation magnitude
+                noise = torch.randn_like(param) * perturbation_rate
                 param.add_(mask * noise)
 
     @torch.no_grad()

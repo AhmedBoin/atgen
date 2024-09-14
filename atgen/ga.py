@@ -14,7 +14,8 @@ from typing import Dict, List, Tuple
 import pickle
 
 from dna import DNA
-from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
+from utils import (RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, 
+                   print_stats_table, merge_dicts, shift_to_positive, log_level)
 from config import ATGENConfig
 
 
@@ -41,7 +42,6 @@ class ATGEN:
         self.best_fitness = float("-inf")
         self.last_fitness = float("-inf")
         self.worst_shared = float("-inf")
-        self.reached = False
 
     @torch.no_grad()
     def evaluate_fitness(self):
@@ -67,7 +67,7 @@ class ATGEN:
             counter = 0
             for species in self.population.values():
                 for _ in range(len(species)):
-                    self.shared_fitness[counter] = self.shared_fitness[counter]/len(species)
+                    self.shared_fitness[counter] = self.shared_fitness[counter]/log_level(len(species), self.config.log_level)
                     counter += 1
 
     
@@ -132,7 +132,7 @@ class ATGEN:
 
     def filter_population(self, fitness_value):
         for species in self.population.values():
-            length = len(species)
+            length = log_level(len(species), self.config.log_level)
             for i in reversed(range(len(species))):
                 if self.config.shared_fitness:
                     if ((species[i][1]-self.worst_shared)/length) <= fitness_value:
@@ -333,22 +333,6 @@ class ATGEN:
     def load_population(self, file_name="population.pkl"):
         with open(f'{file_name}', 'rb') as file:
             self.population = pickle.load(file)
-
-
-def merge_dicts(dict1: Dict[int, List[Tuple[nn.Sequential, float]]], dict2: Dict[int, List[Tuple[nn.Sequential, float]]]):
-    for key, value in dict2.items():
-        if key in dict1:
-            dict1[key].extend(value)
-        else:
-            dict1[key] = value
-    return dict1
-
-def shift_to_positive(arr):
-    min_val = min(arr)
-    if min_val < 0:
-        shift = abs(min_val) + 1  # Add a buffer of 1 to avoid zero
-        return [x + shift for x in arr]
-    return arr
     
 
 def evaluate_fitness_single(args):

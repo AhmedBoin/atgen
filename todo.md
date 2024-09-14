@@ -7,8 +7,8 @@ make convolution identity layer {cm:2024-08-30}
 add conv2d support to the algorithm {cm:2024-09-02}
 add kernel change to the conv layer {cm:2024-09-02}
 match conv with fully connected layer {cm:2024-09-02}
-handle crossover with CNN, split at maxpool and flatten
-convert population from list to ModuleList
-make species version of algorithm
+handle crossover with CNN, split at maxpool and flatten {cm:2024-09-14}
+convert population from list to ModuleList {cm:2024-09-14}
+make species version of algorithm {cm:2024-09-14}
 check the fitness function accuracy {cm:2024-09-06}
 parallelism fitness and training functions

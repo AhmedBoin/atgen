@@ -117,3 +117,9 @@ with tqdm(total=total_items) as pbar:
             pbar.update(1)  # Update the progress bar
 
 print(my_dict)
+print(math.log2(1.0+1))
+
+print(nn.Linear(10, 1).parameters().__next__().requires_grad)
+
+x = nn.Module().parameters()
+print(x)

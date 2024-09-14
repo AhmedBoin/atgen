@@ -9,8 +9,8 @@ from utils import evolve, follow, copy, skip
 class ATGENConfig:
     def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, mutation_rate=0.03, mutation_decay=1.0, min_mutation=0.001, 
                  perturbation_rate=0.02, perturbation_decay=1.0, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, 
-                 speciation_level=0, threshold=0.01, default_activation=ActiSwitch(nn.ReLU()), single_offspring=True, shared_fitness=True, 
-                 dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True,
+                 speciation_level=0, threshold=0.01, log_level=0, default_activation=ActiSwitch(nn.ReLU()), single_offspring=True, 
+                 shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True,
                  save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None):
 
         # Crossover setting
@@ -35,6 +35,7 @@ class ATGENConfig:
 
         self.speciation_level = speciation_level  # 0->layer level, else-> neuron level
         self.shared_fitness = shared_fitness
+        self.log_level = log_level
         self.save_every_generation = save_every_generation
 
         # Network setting
@@ -105,6 +106,7 @@ class ATGENConfig:
 
             'speciation_level': self.speciation_level,
             'shared_fitness': self.shared_fitness,
+            'log_level': self.log_level,
             'save_every_generation': self.save_every_generation,
 
             'threshold': self.threshold,
@@ -151,6 +153,7 @@ class ATGENConfig:
 
             speciation_level=config_data['speciation_level'],
             shared_fitness=config_data['shared_fitness'],
+            log_level=config_data['log_level'],
             save_every_generation=config_data['save_every_generation'],
 
             threshold=config_data['threshold'],
