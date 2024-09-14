@@ -95,3 +95,25 @@ print(hash("Hi"))
 
 x = [1, 2, 3]
 print(x[:-1])
+
+
+from tqdm import tqdm
+
+# Example dictionary
+my_dict = {
+    'a': [1, 2, 3],
+    'b': [4, 5, 6],
+    'c': [7, 8, 9]
+}
+
+# Calculate the total number of items in all lists
+total_items = sum(len(value_list) for value_list in my_dict.values())
+
+# Create a single progress bar for all items
+with tqdm(total=total_items) as pbar:
+    for value_list in my_dict.values():
+        for i in range(len(value_list)):
+            value_list[i] = 5  # Modify the value in place
+            pbar.update(1)  # Update the progress bar
+
+print(my_dict)

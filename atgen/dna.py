@@ -214,7 +214,7 @@ class DNA:
         for block in self.dna:
             new.extend(block.new())
         model = nn.Sequential(*new)
-        return model
+        return copy.deepcopy(model)
     
     def population(self, size, device="cpu"):
         return [self.new().to(device) for _ in size]
@@ -300,8 +300,8 @@ class DNA:
 # helper crossover function
 def _sizes(list1: List[int], list2: List[int]):
     offspring =  [random.randint(min(a, b), max(a, b)) for a, b in zip(list1, list2)]
-    parent1 = [(o-i, True) if o>i else (i-o, False) for o, i in zip(offspring, list1)]
-    parent2 = [(o-i, True) if o>i else (i-o, False) for o, i in zip(offspring, list2)]
+    parent1 = [(o-i, False) if o>i else (i-o, True) for o, i in zip(offspring, list1)]
+    parent2 = [(o-i, False) if o>i else (i-o, True) for o, i in zip(offspring, list2)]
     return parent1, parent2
 
 if __name__ == "__main__":
@@ -367,25 +367,33 @@ if __name__ == "__main__":
     data_out = model(data_in)
     print(data_out.shape)
 
-    model2 = dna.new()
-    model3 = dna.new()
-    print(model2[-2].parameters())
-    print(model3[-2].parameters())
 
+    model = nn.Sequential(
+        nn.Linear(10, 10),
+        nn.ReLU(),
+        nn.Linear(10, 3)
+    )
+
+    model = DNA(model, ATGENConfig())
+    print(model.new() is model.new())
 
     model1 = nn.Sequential(
-        nn.Linear(10, 10),
+        nn.Linear(8, 7),
         nn.ReLU(),
-        nn.Linear(10, 3)
+        nn.Linear(7, 8),
+        nn.ReLU(),
+        nn.Linear(8, 4)
     )
+
     model2 = nn.Sequential(
-        nn.Linear(10, 10),
+        nn.Linear(8, 8),
         nn.ReLU(),
-        nn.Linear(10, 3)
+        nn.Linear(8, 8),
+        nn.ReLU(),
+        nn.Linear(8, 4)
     )
-    model1 = DNA(model1, ATGENConfig())
-    model2 = DNA(model2, ATGENConfig())
-    print(model2.dna[0].size())
-    print(model2.size())
-    model1, model2 = (model1 + model2)
+
+    dna1 = DNA(model1, ATGENConfig())
+    dna2 = DNA(model2, ATGENConfig())
+    dna1+dna2
 

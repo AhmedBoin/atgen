@@ -8,7 +8,7 @@ from utils import evolve, follow, copy, skip
 
 class ATGENConfig:
     def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, single_offspring=True,
-                 mutation_rate=0.1, perturbation_rate=0.9, mutation_decay=1.0, min_mutation=0.001, wider_mutation=0.01, 
+                 mutation_rate=0.03, perturbation_rate=0.02, mutation_decay=1.0, min_mutation=0.001, wider_mutation=0.01, 
                  deeper_mutation=0.0001, threshold=0.01, default_activation=ActiSwitch(nn.ReLU()), shared_fitness=True,
                  dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True, 
                  save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None):
@@ -96,6 +96,8 @@ class ATGENConfig:
             'actiswitch': actiswitch,
             'activation': activation,
             'linear_start': self.linear_start,
+            'shared_fitness': self.shared_fitness,
+            'save_every_generation': self.save_every_generation,
             'layer_dicts': encoded_data,  # This is binary data encoded as a base64 string. Do not modify.
         }
 
@@ -132,6 +134,8 @@ class ATGENConfig:
             threshold=config_data['threshold'],
             default_activation=default_activation,
             linear_start=config_data['linear_start'],
+            shared_fitness=config_data['shared_fitness'],
+            save_every_generation=config_data['save_every_generation'],
             extra_evolve=layer_dicts['evolve'],
             extra_follow=layer_dicts['follow'],
             extra_copy=layer_dicts['copy'],

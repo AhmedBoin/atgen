@@ -23,63 +23,53 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 
-class ATGEN(nn.Module):
+class ATGEN:
     def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), device="cpu"):
-        """
-        Initialize the Genetic Algorithm for evolving neural networks.
-
-        Args:
-            population_size (int): The number of networks in the population.
-            layers (List[int]): The structure of layers for initial networks.
-            activation (function): Activation function for hidden layers.
-            last_activation (function): Activation function for the last layer.
-            bias (bool): Whether to use bias in layers.
-            mutation_rate (float): Probability of mutating a network.
-            crossover_rate (float): Probability of performing crossover between two networks.
-            threshold (float): Threshold for pruning neurons with low weights.
-        """
         self.population_size = population_size
         self.config = config
         self.metrics = 0
         
         # Initialize the population
         dna = DNA(network, config)
-        self.population = [dna.new().to(device) for _ in range(population_size)]
-        self.species: Dict[int, List[nn.Sequential]] = {dna.structure(): self.population}
+        self.population: Dict[int, List[Tuple[nn.Sequential, float]]] = {dna.structure(): [[dna.new().to(device), 0.0] for _ in range(population_size)]}
         self.fitness_scores = [0.0] * population_size
-        self.group_size = [population_size] * population_size
         self.shared_fitness = copy.deepcopy(self.fitness_scores)
         self.selection_probs = copy.deepcopy(self.fitness_scores)
+        self.best_individual = network 
+
+        # Preview results
         self.best_fitness = float("-inf")
         self.last_fitness = float("-inf")
+        self.reached = False
 
     @torch.no_grad()
     def evaluate_fitness(self):
         """
         Evaluate the fitness of each network in the population.
         """
-        self.fitness_scores = [0.0] * len(self.population)
-        self.shared_fitness = [0.0] * len(self.population)
-
-        for i, network in enumerate(tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100)):
-            self.fitness_scores[i] = self.fitness_fn(network)
-            self.shared_fitness[i] = self.fitness_scores[i] / self.group_size[i]
-        
-        # args = [(i, network, self.fitness_fn) for i, network in enumerate(self.population)]
-        # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for index, fitness_score in tqdm(pool.imap_unordered(evaluate_fitness_single, args), total=len(args), desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100):
-        #         self.fitness_scores[index] = fitness_score
+        best_individual = float("-inf")
+        self.fitness_scores = []
+        self.shared_fitness = []
+        with tqdm(total=self.population_size, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100) as pbar:
+            for species in self.population.values():
+                for i in range(len(species)):
+                    species[i][1] = self.fitness_fn(species[i][0])
+                    self.fitness_scores.append(species[i][1])
+                    self.shared_fitness.append(species[i][1]/len(species))
+                    if species[i][1] > best_individual:
+                        best_individual = species[i][1]
+                        self.best_individual = species[i][0]
+                    pbar.update(1)
 
     def evaluate_learn(self):
         """
         """
-        for genome in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
-            self.backprob_fn(genome)
-
-        # args = [(genome, self.learn_fn) for genome in self.population]
-        # with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
-        #     for _ in tqdm(pool.imap_unordered(refine_genome, args), total=len(args), desc=f"{BLUE}RL Generation Refinement{RESET_COLOR}", ncols=100):
-        #         pass
+        
+        with tqdm(total=self.population_size, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100) as pbar:
+            for species in self.population.values():
+                for i in range(len(species)):
+                    self.backprob_fn(species[i][0])
+                    pbar.update(1)
 
     def select_parents(self) -> Tuple[DNA, DNA]:
         """
@@ -88,8 +78,14 @@ class ATGEN(nn.Module):
         Returns:
             Tuple[DNA, DNA]: Two selected parent networks.
         """
-        parent1 = DNA(random.choices(self.population, weights=self.selection_probs, k=1)[0], self.config)
-        parent2 = DNA(random.choices(self.population, weights=self.selection_probs, k=1)[0], self.config)
+        while True:
+            species: int = random.choices(list(self.population.keys()), weights=[len(species) for species in self.population.values()], k=1)[0]
+            if len(self.population[species]) > 1:
+                break
+            
+        weights = shift_to_positive([fitness[1] for fitness in self.population[species]])
+        parents = random.choices(self.population[species], weights=weights, k=2)
+        parent1, parent2 = DNA(parents[0][0], self.config), DNA(parents[1][0], self.config)
         
         return parent1, parent2
 
@@ -105,6 +101,7 @@ class ATGEN(nn.Module):
         Returns:
             DNA: A new offspring network created from crossover.
         """
+        
         offspring1, offspring2 = parent1 + parent2
 
         return offspring1, offspring2
@@ -123,14 +120,21 @@ class ATGEN(nn.Module):
             network.evolve_wider()
         network.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
 
+    def filter_population(self, fitness_value):
+        for species in self.population.values():
+            which = len(species) if self.config.shared_fitness else 1
+            for i in reversed(range(len(species))):
+                if (species[i][1]/which) < fitness_value:
+                    del species[i]
+
     def preview_results(self):
         fitness = [max(self.fitness_scores), numpy.mean(self.fitness_scores), min(self.fitness_scores)]
         color = GREEN if fitness[self.metrics] > self.best_fitness else GRAY if fitness[self.metrics] > self.last_fitness else RED
 
         print(f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness[self.metrics]}{RESET_COLOR}")
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
-        DNA(self.population[0], self.config).summary()
-        print_stats_table(self.best_fitness, self.metrics, fitness, self.population_size, len(self.species))
+        DNA(self.best_individual, self.config).summary()
+        print_stats_table(self.best_fitness, self.metrics, fitness, self.population_size, len(self.population))
 
         self.last_fitness = fitness[self.metrics] 
         if fitness[self.metrics] > self.best_fitness: 
@@ -145,77 +149,75 @@ class ATGEN(nn.Module):
         Args:
             fitness_fn (function): A function to evaluate the fitness of a network.
         """
-
-        # Set generation size:
-        crossover_size = int((1-self.config.crossover_rate)*self.population_size) if self.config.dynamic_dropout_population else self.population_size//2
         
-        # Evaluate the fitness of each network
+        # Evaluate the fitness
         self.evaluate_fitness()
-
-        # select sorting type
-        fitness_score = self.shared_fitness if self.config.shared_fitness else self.fitness_scores
-        sorted_population = [ind for _, ind in sorted(zip(fitness_score, self.population), key=lambda x: x[0], reverse=True)]
-        self.population = sorted_population[:crossover_size]  # Select top percent
-
-        # preview training data
+        
+        # Sort and Select top percent
+        crossover_size = math.ceil((1-self.config.crossover_rate)*self.population_size) if self.config.dynamic_dropout_population else self.population_size//2
+        fitness_score = sorted(self.shared_fitness if self.config.shared_fitness else self.fitness_scores, reverse=True)
+        self.filter_population(fitness_score[crossover_size])
+        
+        # preview results
         results = self.preview_results()
 
-        # selection of parents probabilities
-        fits = sorted([fit for fit in fitness_score], reverse=True)[:crossover_size]
-        min_fit = min(fits)
-        fits = [fit-min_fit for fit in fits] # make all positive numbers
-        total_fitness = sum(fits)
-        self.selection_probs = [score / total_fitness for score in fits] # convert to probabilities
-        
+        # return if criteria reached
+        if self.check_criteria(results):
+            return results
         
         # offsprings generation
-        offsprings = []
+        offsprings: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
         if self.config.single_offspring:
             repeat = self.population_size-crossover_size
             for _ in tqdm(range(repeat), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
                 parent1, parent2 = self.select_parents()
                 offspring = self.crossover(parent1, parent2)[0]
                 self.mutate(offspring)
+                key = offspring.structure()
                 offspring = offspring.reconstruct()
-                offsprings.append(offspring)
+                if key in offsprings:
+                    offsprings[key].append([offspring, float("-inf")])
+                else:
+                    offsprings[key] = [[offspring, float("-inf")]]
         else:
             for _ in tqdm(range(math.ceil(repeat/2)), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
                 parent1, parent2 = self.select_parents()
                 offspring1, offspring2 = self.crossover(parent1, parent2)
                 self.mutate(offspring1)
                 self.mutate(offspring2)
+                key1 = offspring1.structure()
+                key2 = offspring2.structure()
                 offspring1 = offspring1.reconstruct()
                 offspring2 = offspring2.reconstruct()
-                offsprings.append(offspring1)
-                offsprings.append(offspring2)
+                if key1 in offsprings:
+                    offsprings[key1].append([offspring1, float("-inf")])
+                else:
+                    offsprings[key1] = [[offspring1, float("-inf")]]
+                if key2 in offsprings:
+                    offsprings[key2].append([offspring2, float("-inf")])
+                else:
+                    offsprings[key2] = [[offspring2, float("-inf")]]
             if (repeat%2) == 1:
-                offsprings.pop()
+                offsprings[key2].pop()
+                if len(offsprings[key2]) == 0:
+                    del offsprings[key2]
 
         # mutate parents
         if self.config.parent_mutation:
-            parents = []
-            for individual in self.population:
-                individual = DNA(individual, self.config)
-                self.mutate(individual)
-                parents.append(individual.reconstruct())
-            self.population = parents + offsprings
+            parents: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
+            for individuals in self.population.values():
+                for individual in individuals:
+                    parent = DNA(individual[0], self.config)
+                    self.mutate(parent)
+                    key = parent.structure()
+                    parent = parent.reconstruct()
+                    if key in parents:
+                        parents[key].append([parent, float("-inf")])
+                    else:
+                        parents[key] = [[parent, float("-inf")]]
+            self.population = merge_dicts(parents, offsprings)
         else:
-            self.population.extend(offsprings)
-
-        # species individual into subgroups
-        self.species = {}
-        for individual in self.population:
-            individual_id = DNA(individual, self.config).structure()
-            if individual in self.species:
-                self.species[individual_id].append(individual)
-            else:
-                self.species[individual_id] = [individual]
-                
-        for i, individual in enumerate(self.population):
-            for key in self.species.keys():
-                if DNA(individual, self.config).structure() == key:
-                    self.group_size[i] = len(self.species[key])
-                    break
+            self.population = merge_dicts(self.population, offsprings)
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
@@ -232,10 +234,14 @@ class ATGEN(nn.Module):
             self.save_population(self.save_name)
 
         return results
+    
+    def check_criteria(self, results):
+        return results[self.metrics] > self.required_fitness
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
         self.metrics = metrics
         self.save_name = save_name
+        self.required_fitness = fitness
         last_fitness = -float("inf")
         maximum, mean, minimum = [], [], []
         if generation is not None:
@@ -265,10 +271,6 @@ class ATGEN(nn.Module):
             
         else:
             raise ValueError("evolve using generation number or fitness value")
-        
-        # rearrange
-        self.evaluate_fitness()
-        self.population = [ind for _, ind in sorted(zip(self.shared_fitness, self.population), key=lambda x: x[0], reverse=True)]
         
         if save_name is not None:
             self.save_population(save_name)
@@ -312,6 +314,22 @@ class ATGEN(nn.Module):
     def load_population(self, file_name="population.pkl"):
         with open(f'{file_name}', 'rb') as file:
             self.population = pickle.load(file)
+
+
+def merge_dicts(dict1: Dict[int, List[Tuple[nn.Sequential, float]]], dict2: Dict[int, List[Tuple[nn.Sequential, float]]]):
+    for key, value in dict2.items():
+        if key in dict1:
+            dict1[key].extend(value)
+        else:
+            dict1[key] = value
+    return dict1
+
+def shift_to_positive(arr):
+    min_val = min(arr)
+    if min_val < 0:
+        shift = abs(min_val) + 1  # Add a buffer of 1 to avoid zero
+        return [x + shift for x in arr]
+    return arr
     
 
 def evaluate_fitness_single(args):

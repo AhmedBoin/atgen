@@ -16,10 +16,10 @@ env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        super().__init__(population_size, model, ATGENConfig(crossover_rate=0.8, deeper_mutation=0.1))
+        super().__init__(population_size, model, ATGENConfig(crossover_rate=0.5))
 
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 1
+        epochs = 10
         # env = gym.make("LunarLander-v2")
         total_reward = 0
         for _ in range(epochs):
@@ -109,11 +109,11 @@ class NeuroEvolution(ATGEN):
 if __name__ == "__main__":
     model = nn.Sequential(nn.Linear(8, 4))
     ne = NeuroEvolution(100, model)
-    # ne.load_population()
-    ne.evolve(fitness=285, save_name="population.pkl", metrics=0, plot=True)
+    ne.load_population()
+    ne.evolve(fitness=150, save_name="population.pkl", metrics=1, plot=True)
     
-    model = ne.population[0]
-    # env = gym.make("LunarLander-v2", render_mode="human")
+    model = ne.best_individual
+    env = gym.make("LunarLander-v2", render_mode="human")
     while True:
         # for i, model in enumerate(ne.population):
             # env = gym.make("LunarLander-v2", render_mode="human")
