@@ -12,15 +12,17 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-env = gym.make("LunarLander-v2")
+# env = gym.make("LunarLander-v2")
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        super().__init__(population_size, model, ATGENConfig(crossover_rate=0.5))
+        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, 
+                             perturbation_decay=0.9, crossover_decay=0.99, single_offspring=False, shared_fitness=False)
+        super().__init__(population_size, model, config)
 
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 10
-        # env = gym.make("LunarLander-v2")
+        epochs = 5
+        env = gym.make("LunarLander-v2")
         total_reward = 0
         for _ in range(epochs):
             state, info = env.reset()
@@ -33,7 +35,7 @@ class NeuroEvolution(ATGEN):
                 
                 if terminated or truncated:
                     break
-        # env.close()
+        env.close()
         return total_reward / epochs
     
     # @torch.no_grad()
@@ -108,14 +110,15 @@ class NeuroEvolution(ATGEN):
 
 if __name__ == "__main__":
     model = nn.Sequential(nn.Linear(8, 4))
-    ne = NeuroEvolution(100, model)
-    ne.load_population()
-    ne.evolve(fitness=150, save_name="population.pkl", metrics=1, plot=True)
+    ne = NeuroEvolution(300, model)
+    # ne.load_population()
+    ne.evolve(fitness=280, save_name="population.pkl", metrics=0, plot=True)
     
     model = ne.best_individual
     env = gym.make("LunarLander-v2", render_mode="human")
     while True:
-        # for i, model in enumerate(ne.population):
+        # for i, model in enumerate(ne.population.values()):
+            # model = model[i][0]
             # env = gym.make("LunarLander-v2", render_mode="human")
             state, info = env.reset()
             total_reward = 0

@@ -61,10 +61,13 @@ class EvolveBlock:
         return len(self.modules)
     
     def structure(self):
-        kind = self.modules[0].__class__.__name__
-        if kind.startswith("Lazy"):
-            kind = kind[4:]
-        return kind
+        if self.config.speciation_level == 1:
+            kind = self.modules[0].__class__.__name__
+            if kind.startswith("Lazy"):
+                kind = kind[4:]
+            return kind
+        else:
+            return str(self.genes())
     
     def new(self) -> List[nn.Module]:
         new = []

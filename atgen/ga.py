@@ -40,27 +40,37 @@ class ATGEN:
         # Preview results
         self.best_fitness = float("-inf")
         self.last_fitness = float("-inf")
+        self.worst_shared = float("-inf")
         self.reached = False
 
     @torch.no_grad()
     def evaluate_fitness(self):
         """
-        Evaluate the fitness of each network in the population.
+        Evaluate the fitness of each network in the 
         """
-        best_individual = float("-inf")
+
         self.fitness_scores = []
         self.shared_fitness = []
+
         with tqdm(total=self.population_size, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100) as pbar:
             for species in self.population.values():
                 for i in range(len(species)):
                     species[i][1] = self.fitness_fn(species[i][0])
                     self.fitness_scores.append(species[i][1])
-                    self.shared_fitness.append(species[i][1]/len(species))
-                    if species[i][1] > best_individual:
-                        best_individual = species[i][1]
+                    if species[i][1] > self.best_fitness:
                         self.best_individual = species[i][0]
                     pbar.update(1)
+        
+        if self.config.shared_fitness:
+            self.worst_shared = min(self.fitness_scores)-1
+            self.shared_fitness = [fitness-self.worst_shared for fitness in self.fitness_scores]
+            counter = 0
+            for species in self.population.values():
+                for _ in range(len(species)):
+                    self.shared_fitness[counter] = self.shared_fitness[counter]/len(species)
+                    counter += 1
 
+    
     def evaluate_learn(self):
         """
         """
@@ -122,10 +132,14 @@ class ATGEN:
 
     def filter_population(self, fitness_value):
         for species in self.population.values():
-            which = len(species) if self.config.shared_fitness else 1
+            length = len(species)
             for i in reversed(range(len(species))):
-                if (species[i][1]/which) < fitness_value:
-                    del species[i]
+                if self.config.shared_fitness:
+                    if ((species[i][1]-self.worst_shared)/length) <= fitness_value:
+                        del species[i]
+                else:
+                    if species[i][1] <= fitness_value:
+                        del species[i]
 
     def preview_results(self):
         fitness = [max(self.fitness_scores), numpy.mean(self.fitness_scores), min(self.fitness_scores)]
@@ -134,11 +148,17 @@ class ATGEN:
         print(f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness[self.metrics]}{RESET_COLOR}")
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
         DNA(self.best_individual, self.config).summary()
-        print_stats_table(self.best_fitness, self.metrics, fitness, self.population_size, len(self.population))
 
         self.last_fitness = fitness[self.metrics] 
         if fitness[self.metrics] > self.best_fitness: 
             self.best_fitness = fitness[self.metrics]
+
+        print_stats_table(self.best_fitness, self.metrics, fitness, self.population_size, len(self.population))
+
+        # Debug for fitness ##################################################################################
+        # for key, species in self.population.items():
+            # print(len(species), max([item[1] for item in species]))
+            # print(f"size: {len(species):<3}, {max([item[1] for item in species]):<7}, Id: {key}")
 
         return fitness
                 
@@ -150,25 +170,23 @@ class ATGEN:
             fitness_fn (function): A function to evaluate the fitness of a network.
         """
         
-        # Evaluate the fitness
+        # Evaluate the fitness and preview results
         self.evaluate_fitness()
+        results = self.preview_results()
+        
+        # return if criteria reached
+        if self.check_criteria(results):
+            return results
         
         # Sort and Select top percent
         crossover_size = math.ceil((1-self.config.crossover_rate)*self.population_size) if self.config.dynamic_dropout_population else self.population_size//2
         fitness_score = sorted(self.shared_fitness if self.config.shared_fitness else self.fitness_scores, reverse=True)
         self.filter_population(fitness_score[crossover_size])
         
-        # preview results
-        results = self.preview_results()
-
-        # return if criteria reached
-        if self.check_criteria(results):
-            return results
-        
         # offsprings generation
         offsprings: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
+        repeat = self.population_size-crossover_size
         if self.config.single_offspring:
-            repeat = self.population_size-crossover_size
             for _ in tqdm(range(repeat), desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100):
                 parent1, parent2 = self.select_parents()
                 offspring = self.crossover(parent1, parent2)[0]
@@ -221,7 +239,7 @@ class ATGEN:
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
-            self.experiences_fn(self.population[0])
+            self.experiences_fn(self.best_individual)
 
         # smooth the generation networks a little back propagation based method
         if self.is_overridden("backprob_fn"):
@@ -230,6 +248,7 @@ class ATGEN:
         # config modification
         self.config.crossover_step()
         self.config.mutation_step()
+        self.config.perturbation_step()
         if self.config.save_every_generation and self.save_name is not None:
             self.save_population(self.save_name)
 
@@ -363,8 +382,8 @@ if __name__ == "__main__":
     ga = ATGEN(population_size=10, network=model)
     
     # Create parent networks with specified architectures
-    parent1 = DNA(ga.population[0], ATGENConfig())
-    parent2 = DNA(ga.population[1], ATGENConfig())
+    parent1 = DNA(ga.population[0][0], ATGENConfig())
+    parent2 = DNA(ga.population[0][1], ATGENConfig())
     
     # Perform crossover
     offspring1 = ga.crossover(parent1, parent2)[0]
