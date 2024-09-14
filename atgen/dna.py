@@ -265,7 +265,7 @@ class DNA:
     def __add__(self, RNA: "DNA"):
         '''Crossover'''
         dna = copy.deepcopy(self)
-        rna = copy.deepcopy(self)
+        rna = copy.deepcopy(RNA)
         if dna.structure() == rna.structure():
             dna_size, rna_size = _sizes(dna.size()[:-1], rna.size()[:-1])
             for i, (t, a) in enumerate(dna_size):
@@ -371,4 +371,21 @@ if __name__ == "__main__":
     model3 = dna.new()
     print(model2[-2].parameters())
     print(model3[-2].parameters())
+
+
+    model1 = nn.Sequential(
+        nn.Linear(10, 10),
+        nn.ReLU(),
+        nn.Linear(10, 3)
+    )
+    model2 = nn.Sequential(
+        nn.Linear(10, 10),
+        nn.ReLU(),
+        nn.Linear(10, 3)
+    )
+    model1 = DNA(model1, ATGENConfig())
+    model2 = DNA(model2, ATGENConfig())
+    print(model2.dna[0].size())
+    print(model2.size())
+    model1, model2 = (model1 + model2)
 

@@ -13,7 +13,6 @@ import random
 from typing import Dict, List, Tuple
 import pickle
 
-from layers import ActiSwitch
 from dna import DNA
 from utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
 from config import ATGENConfig
@@ -106,7 +105,7 @@ class ATGEN(nn.Module):
         Returns:
             DNA: A new offspring network created from crossover.
         """
-        offspring1, offspring2 = parent1 + parent1
+        offspring1, offspring2 = parent1 + parent2
 
         return offspring1, offspring2
 
@@ -124,8 +123,22 @@ class ATGEN(nn.Module):
             network.evolve_wider()
         network.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
 
+    def preview_results(self):
+        fitness = [max(self.fitness_scores), numpy.mean(self.fitness_scores), min(self.fitness_scores)]
+        color = GREEN if fitness[self.metrics] > self.best_fitness else GRAY if fitness[self.metrics] > self.last_fitness else RED
+
+        print(f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness[self.metrics]}{RESET_COLOR}")
+        print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
+        DNA(self.population[0], self.config).summary()
+        print_stats_table(self.best_fitness, self.metrics, fitness, self.population_size, len(self.species))
+
+        self.last_fitness = fitness[self.metrics] 
+        if fitness[self.metrics] > self.best_fitness: 
+            self.best_fitness = fitness[self.metrics]
+
+        return fitness
                 
-    def run_generation(self) -> Tuple[float, float, float]:
+    def run_generation(self) -> List[float]:
         """
         Run a single generation of the genetic algorithm, including evaluation, selection, crossover, mutation, and pruning.
         
@@ -139,29 +152,21 @@ class ATGEN(nn.Module):
         # Evaluate the fitness of each network
         self.evaluate_fitness()
 
-        # preview training data
-        max_fitness = max(self.fitness_scores)
-        min_fitness = min(self.fitness_scores)
-        mean_fitness = numpy.mean(self.fitness_scores)
-        all_fitness = [max_fitness, mean_fitness, mean_fitness]
-        color = GREEN if all_fitness[self.metrics] > self.best_fitness else GRAY if all_fitness[self.metrics] > self.last_fitness else RED
-        print_current_best = f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{ all_fitness[self.metrics] }{RESET_COLOR}"
-        self.last_fitness = all_fitness[self.metrics] 
-        if all_fitness[self.metrics] > self.best_fitness: 
-            self.best_fitness = all_fitness[self.metrics]
-
         # select sorting type
         fitness_score = self.shared_fitness if self.config.shared_fitness else self.fitness_scores
+        sorted_population = [ind for _, ind in sorted(zip(fitness_score, self.population), key=lambda x: x[0], reverse=True)]
+        self.population = sorted_population[:crossover_size]  # Select top percent
 
-        # selection of parents
+        # preview training data
+        results = self.preview_results()
+
+        # selection of parents probabilities
         fits = sorted([fit for fit in fitness_score], reverse=True)[:crossover_size]
         min_fit = min(fits)
         fits = [fit-min_fit for fit in fits] # make all positive numbers
         total_fitness = sum(fits)
         self.selection_probs = [score / total_fitness for score in fits] # convert to probabilities
         
-        sorted_population = [ind for _, ind in sorted(zip(fitness_score, self.population), key=lambda x: x[0], reverse=True)]
-        self.population = sorted_population[:crossover_size]  # Select top percent
         
         # offsprings generation
         offsprings = []
@@ -212,11 +217,6 @@ class ATGEN(nn.Module):
                     self.group_size[i] = len(self.species[key])
                     break
 
-        # results
-        print(print_current_best)
-        print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
-        DNA(self.population[0], self.config).summary()
-
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
             self.experiences_fn(self.population[0])
@@ -226,13 +226,12 @@ class ATGEN(nn.Module):
             self.evaluate_learn()
 
         # config modification
-        print_stats_table(self.best_fitness, self.metrics, max_fitness, mean_fitness, min_fitness, self.population_size, len(self.species))
         self.config.crossover_step()
         self.config.mutation_step()
         if self.config.save_every_generation and self.save_name is not None:
             self.save_population(self.save_name)
 
-        return max_fitness, mean_fitness, min_fitness
+        return results
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
         self.metrics = metrics
