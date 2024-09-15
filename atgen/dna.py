@@ -1,14 +1,14 @@
 import copy
 import random
 import inspect
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import torch
 from torch import nn
 
-from utils import BLUE, BOLD, RESET_COLOR
-from layers import ActiSwitch, EvolveAction
-from config import ATGENConfig
+from .utils import BLUE, BOLD, RESET_COLOR
+from .layers import ActiSwitch, EvolveAction
+from .config import ATGENConfig
 
 
 class EvolveBlock:
@@ -60,7 +60,7 @@ class EvolveBlock:
         return len(self.modules)
     
     def structure(self):
-        if self.config.speciation_level == 1:
+        if self.config.speciation_level == 0:
             kind = self.modules[0].__class__.__name__
             if kind.startswith("Lazy"):
                 kind = kind[4:]
@@ -215,12 +215,22 @@ class DNA:
             struct += block.structure()
         return hash(struct)
     
-    def new(self) -> nn.Sequential:
+    def new(self) -> Tuple[int, nn.Sequential]:
         new = []
         for block in self.dna:
             new.extend(block.new())
-        model = nn.Sequential(*new).to(self.device)
-        return copy.deepcopy(model)
+        model = DNA(copy.deepcopy(nn.Sequential(*new).to(self.device)), self.config)
+        if self.config.random_topology: # if different topology required 
+            depth = random.randint(0, self.config.maximum_depth-1)
+            for _ in range(depth):
+                model.evolve_deeper()
+            width = random.randint(0, self.config.maximum_depth-1)
+            for _ in range(width*width):
+                model.evolve_wider()
+            weights = 1 * (depth if depth > 0 else 1) * ((width*width) if width > 0 else 1)
+            for _ in range(weights):
+                model.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
+        return model.structure(), model.reconstruct()
     
     def population(self, size):
         return [self.new().to(self.device) for _ in size]
@@ -230,7 +240,7 @@ class DNA:
     
     @torch.no_grad()
     def evolve_deeper(self, idx: int=None):
-        if self.dna:
+        if self.dna and (self.config.maximum_depth > len(self.dna)):
             idx = random.randint(0, len(self.dna)-1) if idx is None else idx
             if self.dna[idx].mutate():
                 self.dna.insert(idx, self.dna[idx].identity())
@@ -238,7 +248,7 @@ class DNA:
                 if (idx == (len(self.dna)-2)) and (self.config.default_activation is not None): # add activation function if copying last layer
                     if len(self.dna[-2].modules) > 1:
                         self.dna[-2].modules.pop()
-                    self.dna[-2].modules.append(self.config.default_activation)
+                    self.dna[-2].modules.append(copy.deepcopy(self.config.default_activation))
 
     @torch.no_grad()
     def evolve_wider(self, idx: int=None, remove: bool=None):

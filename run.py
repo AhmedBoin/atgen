@@ -5,33 +5,43 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 
 from atgen.ga import ATGEN
+from atgen.memory import ReplayBuffer
 from atgen.config import ATGENConfig
 
 import gymnasium as gym
 import warnings
 
+from atgen.layers.activations import ActiSwitch
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# env = gym.make("LunarLander-v2")
+game = "BipedalWalker-v3"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, log_level=1,
-                             perturbation_decay=0.9, crossover_decay=0.99, single_offspring=False, shared_fitness=False)
+        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.03, perturbation_rate=0.02, log_level=0, maximum_depth=3,
+                             single_offspring=False, speciation_level=1, deeper_mutation=0.01, wider_mutation=0.1, random_topology=True)
         super().__init__(population_size, model, config)
+        # self.memory = ReplayBuffer(24, 5000)
+        self.steps = 100
+        self.my_fitness = float("-inf")
 
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 5
-        env = gym.make("LunarLander-v2")
+        if self.best_fitness > self.my_fitness:
+            self.my_fitness = self.best_fitness
+            self.steps += 100
+        epochs = 1
+        env = gym.make(game)
         total_reward = 0
         for _ in range(epochs):
             state, info = env.reset()
-            while True:
+            for _ in range(self.steps):
                 with torch.no_grad():
-                    action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
-                next_state, reward, terminated, truncated, info = env.step(action)
+                    # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()     # lunar-lander
+                    action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
+                state, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
-                state = next_state
+                # state = next_state
                 
                 if terminated or truncated:
                     break
@@ -39,13 +49,14 @@ class NeuroEvolution(ATGEN):
         return total_reward / epochs
     
     # @torch.no_grad()
-    # def experiences_fn(self, model: ATNetwork):
+    # def experiences_fn(self, model: nn.Sequential):
     #     epochs = 10
-    #     env = gym.make("LunarLander-v2")
+    #     env = gym.make(game)
     #     for _ in range(epochs):
     #         state, info = env.reset()
     #         while True:
-    #             action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
+    #             # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
+    #             action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
     #             next_state, reward, terminated, truncated, info = env.step(action)
     #             self.memory.add(state, action, reward, next_state, terminated or truncated)
     #             state = next_state
@@ -55,10 +66,10 @@ class NeuroEvolution(ATGEN):
     #     env.close()
 
     # @torch.no_grad()
-    # def experiences_fn(self, model: ATNetwork):
+    # def experiences_fn(self, model: nn.Sequential):
     #     epochs = 10
     #     gamma = 0.80  # Set gamma to a suitable value for discounting future rewards
-    #     env = gym.make("LunarLander-v2")
+    #     env = gym.make(game)
         
     #     for _ in range(epochs):
     #         state, info = env.reset()
@@ -87,44 +98,44 @@ class NeuroEvolution(ATGEN):
     #     env.close()
     
     
-    # def backprob_fn(self, model: ATNetwork):
+    # def backprob_fn(self, model: nn.Sequential):
     #     epochs = 100
-    #     gamma = 0.99
-    #     optimizer = AdamW(model.parameters(), lr=1e-4)
-    #     for i in range(epochs):
+    #     gamma = 0.9
+    #     optimizer = AdamW(model.parameters(), lr=1e-3)
+    #     for _ in range(epochs):
     #         states, actions, rewards, next_states, dones = self.memory.sample()
             
-    #         Q_targets_next = model(next_states).detach().max(dim=1, keepdim=True)[0]
+    #         # Q_targets_next = model(next_states).detach().max(dim=1, keepdim=True)[0]
+    #         Q_targets_next = model(next_states).detach()
     #         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
             
-    #         Q_expected = model(states).gather(dim=1, index=actions)
+    #         # Q_expected = model(states).gather(dim=1, index=actions)
+    #         Q_expected = model(states)
             
     #         loss = F.huber_loss(Q_expected, Q_targets)
     #         optimizer.zero_grad()
     #         loss.backward()
     #         optimizer.step()
-            
-    #         # if i == (epochs // 2):
-    #         #     model.prune()
-    #         #     optimizer = AdamW(model.parameters(), lr=1e-1)
 
 if __name__ == "__main__":
-    model = nn.Sequential(nn.Linear(8, 4))
-    ne = NeuroEvolution(300, model)
+    model = nn.Sequential(nn.Linear(24, 4), nn.Tanh())
+    ne = NeuroEvolution(1000, model)
+    # ne.config = ne.config.load()
     # ne.load_population()
     ne.evolve(fitness=280, save_name="population.pkl", metrics=0, plot=True)
+    # ne.evolve(generation=1, save_name="population.pkl", metrics=0, plot=True)
     
     model = ne.best_individual
-    env = gym.make("LunarLander-v2", render_mode="human")
+    env = gym.make(game, render_mode="human")
     while True:
         # for i, model in enumerate(ne.population.values()):
             # model = model[i][0]
-            # env = gym.make("LunarLander-v2", render_mode="human")
             state, info = env.reset()
             total_reward = 0
             while True:
                 with torch.no_grad():
-                    action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
+                    # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
+                    action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:

@@ -3,11 +3,13 @@ import numpy as np
 
 
 class ReplayBuffer:
-    def __init__(self, state_size: int, buffer_size: int, batch_size: int = 64, device="cpu"):
+    def __init__(self, state_size: int, action_size: int=None, buffer_size: int=5000, batch_size: int = 64, device="cpu"):
         if state_size is None:
             state_size = 1
+            action_size = 1
         self.states = np.zeros([buffer_size, state_size], dtype=np.float32)
-        self.actions = np.zeros(buffer_size, dtype=np.float32)
+        # self.actions = np.zeros(buffer_size, dtype=np.float32)
+        self.actions = np.zeros([buffer_size, action_size], dtype=np.float32)
         self.rewards = np.zeros(buffer_size, dtype=np.float32)
         self.next_states = np.zeros([buffer_size, state_size], dtype=np.float32)
         self.dones = np.zeros(buffer_size, dtype=np.float32)
@@ -19,7 +21,7 @@ class ReplayBuffer:
 
     def clear(self):
         self.states = np.zeros_like(self.states)
-        self.actions = np.zeros_like(self.actions)
+        # self.actions = np.zeros_like(self.actions)
         self.rewards = np.zeros_like(self.rewards)
         self.next_states = np.zeros_like(self.next_states)
         self.dones = np.zeros_like(self.dones)
@@ -28,7 +30,7 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
         self.states[self.ptr] = state
-        self.actions[self.ptr] = action
+        # self.actions[self.ptr] = action
         self.rewards[self.ptr] = reward
         self.next_states[self.ptr] = next_state
         self.dones[self.ptr] = done
@@ -39,7 +41,8 @@ class ReplayBuffer:
         idxs = np.random.choice(self.current_size, size=self.batch_size, replace=False)
         
         states = torch.tensor(self.states[idxs]).float().to(self.device)
-        actions = torch.tensor(self.actions[idxs]).long().reshape(-1, 1).to(self.device)
+        # actions = torch.tensor(self.actions[idxs]).long().reshape(-1, 1).to(self.device)
+        actions = torch.tensor(self.actions[idxs]).float().to(self.device)
         rewards = torch.tensor(self.rewards[idxs]).float().reshape(-1, 1).to(self.device)
         next_states = torch.tensor(self.next_states[idxs]).float().to(self.device)
         dones = torch.tensor(self.dones[idxs]).float().reshape(-1, 1).to(self.device)

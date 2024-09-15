@@ -5,12 +5,13 @@ import torch.nn as nn
 from torch.nn import init
 
 
-from layers import (
+from .layers import (
     ActiSwitch, LayerModifier, LinearModifier, Conv1dModifier, Conv2dModifier, Conv3dModifier, 
     ConvTranspose1dModifier, ConvTranspose2dModifier, ConvTranspose3dModifier,
     BatchNorm1dModifier, BatchNorm2dModifier, BatchNorm3dModifier, InstanceNorm1dModifier, 
     InstanceNorm2dModifier, InstanceNorm3dModifier, LayerNormModifier, GroupNormModifier
     )
+
 
 copy = {
     ActiSwitch: None,
@@ -130,10 +131,22 @@ def custom_reset_weights(m):
 
 from tabulate import tabulate
 
-def print_stats_table(best, metrics, fitness, population, species=1):
+# def print_stats_table(best, metrics, fitness, population, species, config):
+#     met = ["Maximum", "Mean", "Minimum"]
+#     headers = ["Best", "Metrics","Maximum", "Mean", "Minimum", "Population", "Species"]
+#     table = [[best, met[metrics], fitness[0], fitness[1], fitness[2], population, species]]
+#     print(tabulate(table, headers, tablefmt="fancy_grid"))
+#     if config.verbose:
+#         headers = ["Crossover", "Mutation", "Perturbation"]
+#         table = [[config.crossover_rate, config.mutation_rate, config.perturbation_rate]]
+#         print(tabulate(table, headers, tablefmt="fancy_grid"))
+
+def print_stats_table(best, metrics, fitness, population, species, config):
     met = ["Maximum", "Mean", "Minimum"]
-    headers = ["Best", "Metrics","Maximum", "Mean", "Minimum", "Population", "Species"]
-    table = [[best, met[metrics], fitness[0], fitness[1], fitness[2], population, species]]
+    headers = ["Best", "Metrics", "Maximum", "Mean", "Minimum"]
+    table = [[best, met[metrics], fitness[0], fitness[1], fitness[2]], 
+             ["Crossover", "Mutation", "Perturbation", "Population", "Species"],
+             [config.crossover_rate, config.mutation_rate, config.perturbation_rate, population, species]]
     print(tabulate(table, headers, tablefmt="fancy_grid"))
 
 

@@ -3,15 +3,15 @@ import pickle
 import base64
 from typing import Dict
 from torch import nn
-from layers import ActiSwitch, LayerModifier
-from utils import evolve, follow, copy, skip
+from .layers import ActiSwitch, LayerModifier
+from .utils import evolve, follow, copy, skip
 
 class ATGENConfig:
-    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, mutation_rate=0.03, mutation_decay=1.0, min_mutation=0.001, 
-                 perturbation_rate=0.02, perturbation_decay=1.0, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, 
-                 speciation_level=0, threshold=0.01, log_level=0, default_activation=ActiSwitch(nn.ReLU()), single_offspring=True, 
+    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, mutation_rate=0.03, mutation_decay=1.0, min_mutation=0.01, 
+                 perturbation_rate=0.02, perturbation_decay=1.0, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
+                 speciation_level=0, threshold=0.01, log_level=0, default_activation=ActiSwitch(nn.ReLU()), random_topology=False, single_offspring=True, 
                  shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True,
-                 save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None):
+                 save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
 
         # Crossover setting
         self.crossover_rate = crossover_rate
@@ -32,7 +32,9 @@ class ATGENConfig:
         self.deeper_mutation = deeper_mutation
         self.remove_mutation = remove_mutation
         self.parent_mutation = parent_mutation
+        self.maximum_depth = maximum_depth
 
+        self.random_topology = random_topology  
         self.speciation_level = speciation_level  # 0->layer level, else-> neuron level
         self.shared_fitness = shared_fitness
         self.log_level = log_level
@@ -46,6 +48,8 @@ class ATGENConfig:
         self.follow: Dict[nn.Module, LayerModifier] = follow
         self.copy: Dict[nn.Module, LayerModifier] = copy
         self.skip: Dict[nn.Module, LayerModifier] = skip
+
+        self.verbose = verbose
 
         # Evolving setting
         if extra_evolve is not None:
@@ -66,7 +70,7 @@ class ATGENConfig:
     def perturbation_step(self):
         self.perturbation_rate = max(self.perturbation_decay * self.perturbation_rate, self.min_perturbation)
 
-    def save(self, file_path: str):
+    def save(self, file_path: str="config.json"):
         '''Saves the current configuration attributes and serialized layer dictionaries to a JSON file.'''
         actiswitch = isinstance(self.default_activation, ActiSwitch)
         if actiswitch:
@@ -103,7 +107,9 @@ class ATGENConfig:
             'deeper_mutation': self.deeper_mutation,
             'remove_mutation': self.remove_mutation,
             'parent_mutation': self.parent_mutation,
+            'maximum_depth': self.maximum_depth,
 
+            'random_topology': self.random_topology,
             'speciation_level': self.speciation_level,
             'shared_fitness': self.shared_fitness,
             'log_level': self.log_level,
@@ -113,6 +119,7 @@ class ATGENConfig:
             'actiswitch': actiswitch,
             'activation': activation,
             'linear_start': self.linear_start,
+            'verbose': self.verbose,
             'modifiers': encoded_data,  # This is binary data encoded as a base64 string. Do not modify.
         }
 
@@ -120,7 +127,7 @@ class ATGENConfig:
             json.dump(config_data, f, indent=4)
 
     @classmethod
-    def load(cls, file_path: str) -> 'ATGENConfig':
+    def load(cls, file_path: str="config.json") -> 'ATGENConfig':
         '''Loads a configuration from a JSON file and deserializes layer dictionaries from the encoded data.'''
         with open(file_path, 'r') as f:
             config_data = json.load(f)
@@ -150,7 +157,9 @@ class ATGENConfig:
             deeper_mutation=config_data['deeper_mutation'],
             remove_mutation=config_data['remove_mutation'],
             parent_mutation=config_data['parent_mutation'],
+            maximum_depth=config_data['maximum_depth'],
 
+            random_topology=config_data['random_topology'],
             speciation_level=config_data['speciation_level'],
             shared_fitness=config_data['shared_fitness'],
             log_level=config_data['log_level'],
@@ -159,6 +168,7 @@ class ATGENConfig:
             threshold=config_data['threshold'],
             default_activation=default_activation,
             linear_start=config_data['linear_start'],
+            verbose=config_data['verbose'],
             extra_evolve=modifiers['evolve'],
             extra_follow=modifiers['follow'],
             extra_copy=modifiers['copy'],
@@ -166,7 +176,7 @@ class ATGENConfig:
         )
 
     @classmethod
-    def _load_activation(cls, actiswitch, activation_name):
+    def _load_activation(cls, actiswitch, activation_name) -> nn.Module:
         '''Helper method to load the activation function from the config.'''
         if actiswitch:
             activation_class = getattr(nn, activation_name)
