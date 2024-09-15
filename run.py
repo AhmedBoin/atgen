@@ -20,7 +20,7 @@ game = "BipedalWalker-v3"
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
         config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.03, perturbation_rate=0.02, log_level=0, maximum_depth=3,
-                             single_offspring=False, speciation_level=1, deeper_mutation=0.01, wider_mutation=0.1, random_topology=True)
+                             single_offspring=False, speciation_level=1, deeper_mutation=0.01, wider_mutation=0.01, random_topology=True)
         super().__init__(population_size, model, config)
         # self.memory = ReplayBuffer(24, 5000)
         self.steps = 100

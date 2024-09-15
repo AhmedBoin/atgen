@@ -13,10 +13,12 @@ import random
 from typing import Dict, List, Tuple
 import pickle
 
+
+from .species import Individual, Species
 from .dna import DNA
+from .config import ATGENConfig
 from .utils import (RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, 
                    print_stats_table, merge_dicts, shift_to_positive, log_level)
-from .config import ATGENConfig
 
 
 import warnings
@@ -25,23 +27,14 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN:
-    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), device="cpu"):
+    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig()):
         self.population_size = population_size
         self.config = config
         self.metrics = 0
         
         # Initialize the population
-        dna = DNA(network, config)
-        self.population: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
-        for _ in tqdm(range(population_size), desc=f"{BLUE}Initializing Population{RESET_COLOR}", ncols=100):
-            species, genome = dna.new()
-            if species in self.population:
-                self.population[species].append([genome, 0.0])
-            else:
-                self.population[species] = [[genome, 0.0]]
-        self.fitness_scores = []
-        self.shared_fitness = []
-        self.best_individual = network 
+        dna: DNA = DNA(network, config)
+        self.population: Species = Species(population_size, dna, config)
 
         # Preview results
         self.best_fitness = float("-inf")
@@ -55,38 +48,21 @@ class ATGEN:
         Evaluate the fitness of each network in the 
         """
 
-        self.fitness_scores = []
-        self.shared_fitness = []
-        current_population = sum([len(species) for species in self.population.values()])
+        for individual in tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100):
+            individual.fitness = self.fitness_fn(individual.model)
 
-        with tqdm(total=current_population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100) as pbar:
-            for species in self.population.values():
-                for i in range(len(species)):
-                    species[i][1] = self.fitness_fn(species[i][0])
-                    self.fitness_scores.append(species[i][1])
-                    if species[i][1] > self.best_fitness:
-                        self.best_individual = species[i][0]
-                    pbar.update(1)
-        
+        self.population.sort_fitness()
+        self.population.calculate_shared()
         if self.config.shared_fitness:
-            self.worst_shared = min(self.fitness_scores)-1
-            self.shared_fitness = [fitness-self.worst_shared for fitness in self.fitness_scores]
-            counter = 0
-            for species in self.population.values():
-                for _ in range(len(species)):
-                    self.shared_fitness[counter] = self.shared_fitness[counter]/log_level(len(species), self.config.log_level)
-                    counter += 1
+            self.population.sort_shared()
 
     
     def evaluate_learn(self):
         '''backpropagation phase'''
-        current_population = sum([len(species) for species in self.population.values()])
 
-        with tqdm(total=current_population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100) as pbar:
-            for species in self.population.values():
-                for i in range(len(species)):
-                    self.backprob_fn(species[i][0])
-                    pbar.update(1)
+        for individual in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
+            self.backprob_fn(individual.model)
+
 
     def select_parents(self) -> Tuple[DNA, DNA]:
         """
@@ -95,16 +71,8 @@ class ATGEN:
         Returns:
             Tuple[DNA, DNA]: Two selected parent networks.
         """
-        while True:
-            species: int = random.choices(list(self.population.keys()), weights=[len(species) for species in self.population.values()], k=1)[0]
-            if len(self.population[species]) > 1:
-                break
-            
-        weights = shift_to_positive([fitness[1] for fitness in self.population[species]])
-        parents = random.choices(self.population[species], weights=weights, k=2)
-        parent1, parent2 = DNA(parents[0][0], self.config), DNA(parents[1][0], self.config)
         
-        return parent1, parent2
+        return self.population.select_parents()
 
     @torch.no_grad()
     def crossover(self, parent1: DNA, parent2: DNA) -> Tuple[DNA, DNA]:
@@ -118,10 +86,8 @@ class ATGEN:
         Returns:
             DNA: A new offspring network created from crossover.
         """
-        
-        offspring1, offspring2 = parent1 + parent2
 
-        return offspring1, offspring2
+        return parent1 + parent2
 
     @torch.no_grad()
     def mutate(self, network: DNA):
@@ -137,37 +103,20 @@ class ATGEN:
             network.evolve_wider()
         network.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
 
-    def filter_population(self, fitness_value):
-        for species in self.population.values():
-            length = log_level(len(species), self.config.log_level)
-            for i in reversed(range(len(species))):
-                if self.config.shared_fitness:
-                    if ((species[i][1]-self.worst_shared)/length) <= fitness_value:
-                        del species[i]
-                else:
-                    if species[i][1] <= fitness_value:
-                        del species[i]
-
     def preview_results(self):
-        fitness = [max(self.fitness_scores), numpy.mean(self.fitness_scores), min(self.fitness_scores)]
+        fitness = self.population.fitnesses()
         color = GREEN if fitness[self.metrics] > self.best_fitness else GRAY if fitness[self.metrics] > self.last_fitness else RED
 
         print(f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness[self.metrics]}{RESET_COLOR}")
         print(f"{BLUE}{BOLD}Best{RESET_COLOR}", end=" ")
-        DNA(self.best_individual, self.config).summary()
+        self.population.best_individual_summary()
 
         self.last_fitness = fitness[self.metrics] 
         if fitness[self.metrics] > self.best_fitness: 
             self.best_fitness = fitness[self.metrics]
 
         if self.config.verbose:
-            current_population = sum([len(species) for species in self.population.values()])
-            print_stats_table(self.best_fitness, self.metrics, fitness, current_population, len(self.population), self.config)
-
-        # Debug for fitness ##################################################################################
-        # for key, species in self.population.items():
-            # print(len(species), max([item[1] for item in species]))
-            # print(f"size: {len(species):<3}, {max([item[1] for item in species]):<7}, Id: {key}")
+            print_stats_table(self.best_fitness, self.metrics, fitness, len(self.population), len(self.population.groups), self.config)
 
         return fitness
                 
@@ -188,75 +137,49 @@ class ATGEN:
             return results
         
         # Sort and Select top percent
-        current_population = sum([len(species) for species in self.population.values()])
-        crossover_size = math.ceil((1-self.config.crossover_rate)*current_population) if self.config.dynamic_dropout_population else current_population//2
-        fitness_score = sorted(self.shared_fitness if self.config.shared_fitness else self.fitness_scores, reverse=True)
-        self.filter_population(fitness_score[crossover_size])
+        crossover_size = math.ceil((1-self.config.crossover_rate)*len(self.population)) if self.config.dynamic_dropout_population else len(self.population)//2
+        self.population = self.population[:crossover_size]
         
         # offsprings generation
-        offsprings: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
+        offsprings: List[DNA] = []
         repeat = max(self.population_size-crossover_size, 0)
-        total_mutation = repeat + sum([len(species) for species in self.population.values()]) if self.config.parent_mutation else 0
+        total_mutation = repeat + len(self.population) if self.config.parent_mutation else 0
         with tqdm(total=total_mutation, desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100) as pbar:
             if self.config.single_offspring:
                 for _ in range(repeat):
                     parent1, parent2 = self.select_parents()
                     offspring = self.crossover(parent1, parent2)[0]
                     self.mutate(offspring)
-                    key = offspring.structure()
-                    offspring = offspring.reconstruct()
-                    if key in offsprings:
-                        offsprings[key].append([offspring, float("-inf")])
-                    else:
-                        offsprings[key] = [[offspring, float("-inf")]]
+                    offsprings.append(offspring)
                     pbar.update(1)
             else:
                 for i in range(math.ceil(repeat/2)):
                     parent1, parent2 = self.select_parents()
                     offspring1, offspring2 = self.crossover(parent1, parent2)
                     self.mutate(offspring1)
-                    key1 = offspring1.structure()
-                    offspring1 = offspring1.reconstruct()
-                    if key1 in offsprings:
-                        offsprings[key1].append([offspring1, float("-inf")])
-                    else:
-                        offsprings[key1] = [[offspring1, float("-inf")]]
+                    offsprings.append(offspring1)
                     pbar.update(1)
                     if not ((i == math.ceil(repeat/2)-1) and ((repeat%2) == 1)):
                         self.mutate(offspring2)
-                        key2 = offspring2.structure()
-                        offspring2 = offspring2.reconstruct()
-                        if key2 in offsprings:
-                            offsprings[key2].append([offspring2, float("-inf")])
-                        else:
-                            offsprings[key2] = [[offspring2, float("-inf")]]
+                        offsprings.append(offspring2)
                         pbar.update(1)
-                # if (repeat%2) == 1:
-                #     offsprings[key2].pop()
-                #     if len(offsprings[key2]) == 0:
-                #         del offsprings[key2]
 
             # mutate parents
             if self.config.parent_mutation:
-                parents: Dict[int, List[Tuple[nn.Sequential, float]]] = {}
-                for species in self.population.values():
-                    for individual in species:
-                        parent = DNA(individual[0], self.config)
-                        self.mutate(parent)
-                        key = parent.structure()
-                        parent = parent.reconstruct()
-                        if key in parents:
-                            parents[key].append([parent, float("-inf")])
-                        else:
-                            parents[key] = [[parent, float("-inf")]]
-                        pbar.update(1)
-                self.population = merge_dicts(parents, offsprings)
-            else:
-                self.population = merge_dicts(self.population, offsprings)
+                parents: List[DNA] = []
+                for individual in self.population:
+                    dna = individual.dna
+                    self.mutate(dna)
+                    parents.append(dna)
+                    pbar.update(1)
+                self.population.clear()
+                self.population.extend(parents)
+            self.population.extend(offsprings)
+            self.population.calculate_species()
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
-            self.experiences_fn(self.best_individual)
+            self.experiences_fn(self.population.best_individual())
 
         # smooth the generation networks a little back propagation based method
         if self.is_overridden("backprob_fn"):

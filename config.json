@@ -10,7 +10,7 @@
     "perturbation_rate": 0.02,
     "perturbation_decay": 1.0,
     "min_perturbation": 0.02,
-    "wider_mutation": 0.1,
+    "wider_mutation": 0.01,
     "deeper_mutation": 0.01,
     "remove_mutation": true,
     "parent_mutation": true,

@@ -215,7 +215,7 @@ class DNA:
             struct += block.structure()
         return hash(struct)
     
-    def new(self) -> Tuple[int, nn.Sequential]:
+    def new(self) -> "DNA":
         new = []
         for block in self.dna:
             new.extend(block.new())
@@ -230,7 +230,7 @@ class DNA:
             weights = 1 * (depth if depth > 0 else 1) * ((width*width) if width > 0 else 1)
             for _ in range(weights):
                 model.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
-        return model.structure(), model.reconstruct()
+        return copy.deepcopy(model)
     
     def population(self, size):
         return [self.new().to(self.device) for _ in size]
