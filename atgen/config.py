@@ -7,11 +7,12 @@ from .layers import ActiSwitch, LayerModifier
 from .utils import evolve, follow, copy, skip
 
 class ATGENConfig:
-    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.2, mutation_rate=0.03, mutation_decay=1.0, min_mutation=0.01, 
-                 perturbation_rate=0.02, perturbation_decay=1.0, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
-                 speciation_level=0, threshold=0.01, log_level=0, default_activation=ActiSwitch(nn.ReLU()), random_topology=False, single_offspring=True, 
-                 shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, remove_mutation=True, linear_start=True,
-                 save_every_generation=True, extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
+    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, 
+                 perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
+                 speciation_level=1, threshold=0.01, log_level=0, population_decay=0.95, min_population=50, default_activation=ActiSwitch(nn.ReLU()), 
+                 random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, 
+                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, 
+                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
 
         # Crossover setting
         self.crossover_rate = crossover_rate
@@ -19,6 +20,7 @@ class ATGENConfig:
         self.min_crossover = min_crossover
         self.dynamic_dropout_population = dynamic_dropout_population
         self.single_offspring = single_offspring
+        self.select_top_only = select_top_only
 
         # Mutation setting
         self.mutation_rate = mutation_rate
@@ -96,6 +98,7 @@ class ATGENConfig:
             'min_crossover': self.min_crossover,
             'dynamic_dropout_population': self.dynamic_dropout_population,
             'single_offspring': self.single_offspring,
+            'select_top_only': self.select_top_only,
 
             'mutation_rate': self.mutation_rate,
             'mutation_decay': self.mutation_decay,
@@ -146,6 +149,7 @@ class ATGENConfig:
             min_crossover=config_data['min_crossover'],
             dynamic_dropout_population=config_data['dynamic_dropout_population'],
             single_offspring=config_data['single_offspring'],
+            select_top_only=config_data['select_top_only'],
 
             mutation_rate=config_data['mutation_rate'],
             mutation_decay=config_data['mutation_decay'],

@@ -39,8 +39,10 @@ class Species:
         self.population.sort(key=lambda x: x.fitness, reverse=True)
 
     def calculate_shared(self):
-        for individual in self.population:
-            individual.shared = (individual.fitness-self.population[-1].fitness) / log_level(self.groups[individual.id], self.config.log_level)
+        fitness_values = numpy.exp([individual.fitness for individual in self.population])
+        normalized_fitness = fitness_values/sum(fitness_values)
+        for individual, shared in zip(self.population, normalized_fitness):
+            individual.shared = shared / log_level(self.groups[individual.id], self.config.log_level)
 
     def sort_shared(self):
         self.population.sort(key=lambda x: x.shared, reverse=True)
@@ -61,7 +63,7 @@ class Species:
         while True:
             id = random.choices(list(self.groups.keys()), list(self.groups.values()), k=1)[0]
             if self.groups[id] > 1:
-                parents = random.choices(*self.genome_group(id), k=2)
+                parents = self.genome_group(id)[0][:2] if self.config.select_top_only else random.choices(*self.genome_group(id), k=2)
                 return parents[0], parents[1]
             
     def append(self, dna: DNA):
@@ -80,7 +82,7 @@ class Species:
     def __iter__(self) -> Iterator[Individual]:
         return iter(self.population)
     
-    def fitnesses(self) -> Tuple[float, float, float]:
+    def fitness_values(self) -> Tuple[float, float, float]:
         fitness = [(individual.fitness if self.config.shared_fitness else individual.fitness) for individual in self.population]
         return max(fitness), numpy.mean(fitness), min(fitness)
     
@@ -92,8 +94,9 @@ class Species:
 
     def __getitem__(self, index):
         if isinstance(index, slice):
-            new_species = Species(0, self.population[0].dna, self.config)
+            new_species = copy.deepcopy(self)
             new_species.population = self.population[index]
+            new_species.config = self.config
             new_species.calculate_species()
             return new_species
         elif isinstance(index, int):

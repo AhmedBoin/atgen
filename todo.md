@@ -11,4 +11,7 @@ handle crossover with CNN, split at maxpool and flatten {cm:2024-09-14}
 convert population from list to ModuleList {cm:2024-09-14}
 make species version of algorithm {cm:2024-09-14}
 check the fitness function accuracy {cm:2024-09-06}
-parallelism fitness and training functions
+parallelism fitness and training functions {cm:2024-09-17}
+make 2 function, before and after editing (crossover, mutation..) {cm:2024-09-17}
+add custom support example, like KAN and Resnet block
+implement symbolic regression

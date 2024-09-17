@@ -1,24 +1,22 @@
 import math
-import numpy
 import torch
 from torch import nn
 
 from tqdm import tqdm
 import multiprocessing
+import concurrent.futures
 import matplotlib.pyplot as plt
 
 import inspect
-import copy
 import random
 from typing import Dict, List, Tuple
 import pickle
 
 
-from .species import Individual, Species
+from .species import Species
 from .dna import DNA
 from .config import ATGENConfig
-from .utils import (RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, 
-                   print_stats_table, merge_dicts, shift_to_positive, log_level)
+from .utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
 
 
 import warnings
@@ -60,8 +58,11 @@ class ATGEN:
     def evaluate_learn(self):
         '''backpropagation phase'''
 
-        for individual in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
-            self.backprob_fn(individual.model)
+        # for individual in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
+        #     self.backprob_fn(individual.model)
+
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            list(tqdm(executor.map(lambda individual: self.backprob_fn(individual.model), self.population), desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100, total=len(self.population)))
 
 
     def select_parents(self) -> Tuple[DNA, DNA]:
@@ -104,7 +105,7 @@ class ATGEN:
         network.evolve_weight(self.config.mutation_rate, self.config.perturbation_rate)
 
     def preview_results(self):
-        fitness = self.population.fitnesses()
+        fitness = self.population.fitness_values()
         color = GREEN if fitness[self.metrics] > self.best_fitness else GRAY if fitness[self.metrics] > self.last_fitness else RED
 
         print(f"{BLUE}Best Fitness{RESET_COLOR}: \t {BOLD}{color}{fitness[self.metrics]}{RESET_COLOR}")
@@ -128,13 +129,20 @@ class ATGEN:
             fitness_fn (function): A function to evaluate the fitness of a network.
         """
         
-        # Evaluate the fitness and preview results
+        # Evaluate the fitness and preview results, also save it if required
         self.evaluate_fitness()
         results = self.preview_results()
+        if self.config.save_every_generation and self.save_name is not None:
+            self.save_population(self.save_name)
+            self.config.save()
         
         # return if criteria reached
         if self.check_criteria(results):
             return results
+        
+        # implement pre_generation if required
+        if self.is_overridden("pre_generation"):
+            self.pre_generation()
         
         # Sort and Select top percent
         crossover_size = math.ceil((1-self.config.crossover_rate)*len(self.population)) if self.config.dynamic_dropout_population else len(self.population)//2
@@ -177,6 +185,10 @@ class ATGEN:
             self.population.extend(offsprings)
             self.population.calculate_species()
 
+        # implement post_generation if required
+        if self.is_overridden("post_generation"):
+            self.post_generation()
+
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
             self.experiences_fn(self.population.best_individual())
@@ -189,13 +201,11 @@ class ATGEN:
         self.config.crossover_step()
         self.config.mutation_step()
         self.config.perturbation_step()
-        if self.config.save_every_generation and self.save_name is not None:
-            self.save_population(self.save_name)
-            self.config.save()
+
 
         return results
     
-    def check_criteria(self, results):
+    def check_criteria(self, results): # saving criteria for reached results
         return results[self.metrics] > self.required_fitness if self.required_fitness else False
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
@@ -266,6 +276,12 @@ class ATGEN:
             if method_name in cls.__dict__:
                 return cls != ATGEN
         return False
+    
+    def pre_generation(self):
+        raise NotImplementedError("implement pre_generation method")
+
+    def post_generation(self):
+        raise NotImplementedError("implement post_generation method")
 
     def save_population(self, file_name="population.pkl"):
         with open(f'{file_name}', 'wb') as file:
@@ -313,49 +329,4 @@ if __name__ == "__main__":
     # Perform crossover
     offspring1 = ga.crossover(parent1, parent2)[0]
     offspring1.summary()
-    
-    # # Create CNN parent networks
-    # parent1 = nn.Sequential(
-    #     Conv2D(3, 32),
-    #     ActiSwitch(nn.ReLU()),
-    #     MaxPool2D(),
-    #     Conv2D(32, 64),
-    #     ActiSwitch(nn.ReLU()),
-    #     MaxPool2D(),
-    #     Flatten(),
-    #     LazyLinear(100),
-    #     ActiSwitch(nn.ReLU()),
-    #     Linear(100, 10),
-    #     input_size=(32, 32)
-    # )
-    # parent2 = nn.Sequential(
-    #     Conv2D(3, 32),
-    #     ActiSwitch(nn.ReLU()),
-    #     MaxPool2D(),
-    #     Conv2D(32, 64),
-    #     ActiSwitch(nn.ReLU()),
-    #     Conv2D(64, 64),
-    #     ActiSwitch(nn.ReLU()),
-    #     MaxPool2D(),
-    #     Flatten(),
-    #     LazyLinear(200),
-    #     ActiSwitch(nn.ReLU()),
-    #     Linear(200, 100),
-    #     ActiSwitch(nn.ReLU()),
-    #     Linear(100, 10),
-    #     input_size=(32, 32)
-    # )
-    # parent1.summary()
-    # parent2.summary()
-    # # summary(parent1, (3, 32, 32), device="cpu")
-    # # summary(parent2, (3, 32, 32), device="cpu")
-    
-    # # Perform crossover
-    # parent2 = parent2.genotype()
-    # print(len(parent2.conv))
-    # parent2.evolve_conv_layer(1)
-    # offspring = ga.crossover(parent1.genotype(), parent2)
-    # offspring = ATNetwork.phenotype(offspring)
-    # offspring.summary()
-    # # summary(offspring, (3, 32, 32), device="cpu")
 

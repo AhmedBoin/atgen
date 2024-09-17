@@ -1,147 +1,137 @@
+from collections import deque
 import random
 import torch
 from torch import nn
-import torch.nn.functional as F
-from torch.optim import AdamW
 
 from atgen.ga import ATGEN
-from atgen.memory import ReplayBuffer
 from atgen.config import ATGENConfig
+from atgen.layers.activations import ActiSwitch
 
 import gymnasium as gym
 import warnings
 
-from atgen.layers.activations import ActiSwitch
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-game = "BipedalWalker-v3"
+game = "CarRacing-v2"
+device = "cpu"
+
+class AutoEncoder(nn.Module):
+    def __init__(self, latent_dim=10):
+        super(AutoEncoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1),  # [48, 48, 16] -> [24, 24, 32]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [12, 12, 64]
+            nn.ReLU(),
+        )
+        self.fc1 = nn.Linear(12 * 12 * 64, latent_dim)
+        self.fc2 = nn.Linear(latent_dim, 12 * 12 * 64)
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # [12, 12, 64] -> [24, 24, 32]
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [48, 48, 16]
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
+            nn.Sigmoid()
+        )
+
+    def reduce(self, x) -> torch.Tensor:
+        x = self.encoder(x)
+        x = x.view(x.size(0), -1)
+        return self.fc1(x)
+
+    def forward(self, x) -> torch.Tensor:
+        latent = self.reduce(x)
+        x = self.fc2(latent)
+        x = x.view(x.size(0), 64, 12, 12)
+        x = self.decoder(x)
+        return x
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.03, perturbation_rate=0.02, log_level=0, maximum_depth=3,
-                             single_offspring=False, speciation_level=1, deeper_mutation=0.01, wider_mutation=0.01, random_topology=True)
+        config = ATGENConfig(crossover_rate=0.6, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9, 
+                             maximum_depth=3, speciation_level=1, deeper_mutation=0.01, wider_mutation=0.01, random_topology=False)
         super().__init__(population_size, model, config)
-        # self.memory = ReplayBuffer(24, 5000)
-        self.steps = 100
+        self.autoencoder = AutoEncoder(latent_dim=10).to(device)
+        try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
+        except: pass
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
+        self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
+        self.buffer = deque(maxlen=10_000)
         self.my_fitness = float("-inf")
+        self.steps = 50
+        self.counter = 0
 
+    @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
-        if self.best_fitness > self.my_fitness:
-            self.my_fitness = self.best_fitness
-            self.steps += 100
+        self.counter += 1
+        if self.counter > self.population_size:
+            if self.my_fitness < self.best_fitness:
+                self.my_fitness = self.best_fitness
+                self.counter = 0
+                self.steps += 50
         epochs = 1
-        env = gym.make(game)
+        env = gym.make(game, max_episode_steps=self.steps)
         total_reward = 0
         for _ in range(epochs):
             state, info = env.reset()
-            for _ in range(self.steps):
-                with torch.no_grad():
-                    # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()     # lunar-lander
-                    action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
+            while True:
+                state = torch.FloatTensor(state/255).permute(2, 0, 1)
+                self.buffer.append(state)
+                feature = self.autoencoder.reduce(state.unsqueeze(0).to(self.device))
+                action = model(feature).squeeze(0).detach().cpu().numpy()
                 state, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
-                # state = next_state
                 
                 if terminated or truncated:
                     break
         env.close()
+        print(self.steps, end="\r")
         return total_reward / epochs
     
-    # @torch.no_grad()
-    # def experiences_fn(self, model: nn.Sequential):
-    #     epochs = 10
-    #     env = gym.make(game)
-    #     for _ in range(epochs):
-    #         state, info = env.reset()
-    #         while True:
-    #             # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
-    #             action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
-    #             next_state, reward, terminated, truncated, info = env.step(action)
-    #             self.memory.add(state, action, reward, next_state, terminated or truncated)
-    #             state = next_state
-                
-    #             if terminated or truncated:
-    #                 break
-    #     env.close()
-
-    # @torch.no_grad()
-    # def experiences_fn(self, model: nn.Sequential):
-    #     epochs = 10
-    #     gamma = 0.80  # Set gamma to a suitable value for discounting future rewards
-    #     env = gym.make(game)
-        
-    #     for _ in range(epochs):
-    #         state, info = env.reset()
-    #         episode_experiences = []  # To store experiences in the current episode
-            
-    #         while True:
-    #             action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
-    #             action = action if random.random() > 0.5 else random.randint(0, 3)
-    #             next_state, reward, terminated, truncated, info = env.step(action)
-                
-    #             # Store the experience temporarily in the episode_experiences list
-    #             episode_experiences.append((state, action, reward, next_state, terminated or truncated))
-                
-    #             state = next_state
-    #             if terminated or truncated:
-    #                 break
-            
-    #         # Reverse iterate over episode experiences to calculate discounted rewards
-    #         cumulative_reward = 0
-    #         for experience in reversed(episode_experiences):
-    #             state, action, reward, next_state, done = experience
-    #             cumulative_reward = reward + gamma * cumulative_reward
-    #             # Add the experience with the discounted reward to the memory
-    #             self.memory.add(state, action, cumulative_reward, next_state, done)
-        
-    #     env.close()
+    def pre_generation(self):
+        for epoch in range(50):
+            input_images = random.sample(self.buffer, 128)
+            input_images = torch.stack(input_images).to(self.device)
+            reconstructed_images = self.autoencoder(input_images)
+            loss = self.criterion(reconstructed_images, input_images)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            print(f"Epoch {epoch+1}, Loss: {loss.item()}", end="\r")
+        print()
+        self.lr_decay.step()
+        torch.save(self.autoencoder.state_dict(), "autoencoder.pth")
     
-    
-    # def backprob_fn(self, model: nn.Sequential):
-    #     epochs = 100
-    #     gamma = 0.9
-    #     optimizer = AdamW(model.parameters(), lr=1e-3)
-    #     for _ in range(epochs):
-    #         states, actions, rewards, next_states, dones = self.memory.sample()
-            
-    #         # Q_targets_next = model(next_states).detach().max(dim=1, keepdim=True)[0]
-    #         Q_targets_next = model(next_states).detach()
-    #         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
-            
-    #         # Q_expected = model(states).gather(dim=1, index=actions)
-    #         Q_expected = model(states)
-            
-    #         loss = F.huber_loss(Q_expected, Q_targets)
-    #         optimizer.zero_grad()
-    #         loss.backward()
-    #         optimizer.step()
 
 if __name__ == "__main__":
-    model = nn.Sequential(nn.Linear(24, 4), nn.Tanh())
-    ne = NeuroEvolution(1000, model)
-    # ne.config = ne.config.load()
-    # ne.load_population()
-    ne.evolve(fitness=280, save_name="population.pkl", metrics=0, plot=True)
-    # ne.evolve(generation=1, save_name="population.pkl", metrics=0, plot=True)
+    model = nn.Sequential(
+        nn.Linear(10, 3), 
+        nn.Tanh()
+    ).to(device)
+    ne = NeuroEvolution(50, model)
+    ne.load_population()
+    # ne.evolve(fitness=900, save_name="population.pkl", metrics=0, plot=True)
     
-    model = ne.best_individual
+    model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")
+    state, info = env.reset()
+    total_reward = 0
     while True:
-        # for i, model in enumerate(ne.population.values()):
-            # model = model[i][0]
-            state, info = env.reset()
-            total_reward = 0
+        for individual in ne.population:
             while True:
                 with torch.no_grad():
-                    # action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
-                    action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
+                    action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:
                         print(f"Last reward: {total_reward}")
-                        # print(f"model: {i:<15}Last reward: {total_reward}")
                         total_reward = 0
                         state, info = env.reset()
                         break
+
     
