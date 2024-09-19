@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 import pickle
 
 
-from .species import Species
+from .species import Individual, Species
 from .dna import DNA
 from .config import ATGENConfig
 from .utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
@@ -198,10 +198,7 @@ class ATGEN:
             self.evaluate_learn()
 
         # config modification
-        self.config.crossover_step()
-        self.config.mutation_step()
-        self.config.perturbation_step()
-
+        self.config.step()
 
         return results
     
@@ -291,25 +288,38 @@ class ATGEN:
         with open(f'{file_name}', 'rb') as file:
             self.population = pickle.load(file)
     
-
-def evaluate_fitness_single(args):
-    """
-    Helper function to evaluate the fitness of a single network.
-    
-    Args:
-        args (tuple): A tuple containing the index of the network and the network object itself.
-    
-    Returns:
-        tuple: A tuple containing the index and the fitness score.
-    """
-    index, network, fitness_fn = args
-    fitness_score = fitness_fn(network)
-    return (index, fitness_score)
-
-def refine_genome(args):
-    genome, learn_fn = args
-    learn_fn(genome)
-    return genome 
+    def continual_evolution(self, fitness):
+        self.evaluate_fitness()
+        fitness_scores = [individual.fitness for individual in self.population]
+        minimum_fitness = min(fitness_scores)
+        generation = 1
+        while True:
+            for i in range(self.population_size):
+                parent1, parent2 = self.select_parents()
+                offspring = self.crossover(parent1, parent2)[0]
+                self.mutate(offspring)
+                offspring = Individual(offspring)
+                offspring.fitness = self.fitness_fn(offspring.model)
+                if offspring.fitness > minimum_fitness:
+                    self.population.exchange(offspring, minimum_fitness)
+                    fitness_scores = [individual.fitness for individual in self.population]
+                    minimum_fitness = min(fitness_scores)
+                    self.population.calculate_shared()
+                    if self.config.shared_fitness:
+                        self.population.sort_shared()
+                if offspring.fitness > self.best_fitness:
+                    self.best_fitness = offspring.fitness
+                    print(f"Generation: {generation}, Better Fitness Reached: {offspring.fitness}")
+                else:
+                    print(f"Generation: {generation}, Offspring Fitness: {offspring.fitness}", end="\r")
+                if self.best_fitness >= fitness:
+                    return
+            generation += 1
+            if self.is_overridden("pre_generation"):
+                self.pre_generation()
+            self.config.step()
+            print("Mutation Rate:",self.config.mutation_rate)
+            self.save_population()
 
 
     

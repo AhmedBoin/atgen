@@ -11,8 +11,8 @@ class ATGENConfig:
                  perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
                  speciation_level=1, threshold=0.01, log_level=0, population_decay=0.95, min_population=50, default_activation=ActiSwitch(nn.ReLU()), 
                  random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, 
-                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, 
-                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
+                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, direct_crossover=False,
+                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True, direct_crossover_rate=0.01):
 
         # Crossover setting
         self.crossover_rate = crossover_rate
@@ -21,6 +21,9 @@ class ATGENConfig:
         self.dynamic_dropout_population = dynamic_dropout_population
         self.single_offspring = single_offspring
         self.select_top_only = select_top_only
+        self.direct_crossover = direct_crossover
+
+        self.direct_crossover_rate = direct_crossover_rate
 
         # Mutation setting
         self.mutation_rate = mutation_rate
@@ -63,13 +66,9 @@ class ATGENConfig:
         if extra_skip is not None:
             self.skip.update(extra_skip)
 
-    def crossover_step(self):
+    def step(self):
         self.crossover_rate = max(self.crossover_decay * self.crossover_rate, self.min_crossover)
-
-    def mutation_step(self):
         self.mutation_rate = max(self.mutation_decay * self.mutation_rate, self.min_mutation)
-
-    def perturbation_step(self):
         self.perturbation_rate = max(self.perturbation_decay * self.perturbation_rate, self.min_perturbation)
 
     def save(self, file_path: str="config.json"):
@@ -99,6 +98,7 @@ class ATGENConfig:
             'dynamic_dropout_population': self.dynamic_dropout_population,
             'single_offspring': self.single_offspring,
             'select_top_only': self.select_top_only,
+            'direct_crossover': self.direct_crossover,
 
             'mutation_rate': self.mutation_rate,
             'mutation_decay': self.mutation_decay,
@@ -150,6 +150,7 @@ class ATGENConfig:
             dynamic_dropout_population=config_data['dynamic_dropout_population'],
             single_offspring=config_data['single_offspring'],
             select_top_only=config_data['select_top_only'],
+            direct_crossover=config_data['direct_crossover'],
 
             mutation_rate=config_data['mutation_rate'],
             mutation_decay=config_data['mutation_decay'],

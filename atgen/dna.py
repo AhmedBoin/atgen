@@ -284,6 +284,7 @@ class DNA:
         dna = copy.deepcopy(self)
         rna = copy.deepcopy(RNA)
         if dna.structure() == rna.structure():
+            
             dna_size, rna_size = _sizes(dna.size()[:-1], rna.size()[:-1])
             for i, (t, a) in enumerate(dna_size):
                 for _ in range(t):
@@ -292,9 +293,15 @@ class DNA:
                 for _ in range(t):
                     rna.evolve_wider(i, a)
             dna, rna = dna.reconstruct(), rna.reconstruct()
-            for param1, param2 in zip(dna.parameters(), rna.parameters()):
-                mask = torch.rand_like(param1.data) > 0.5
-                param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+
+            if self.config.direct_crossover and self.config.single_offspring:
+                for param1, param2 in zip(dna.parameters(), rna.parameters()):
+                    param1.data = torch.where(param1.data > param2.data, param1.data, param2.data)
+                    param1.data = torch.where(param1.data > param2.data, param1.data, torch.rand_like(param1.data))
+            else:
+                for param1, param2 in zip(dna.parameters(), rna.parameters()):
+                    mask = torch.rand_like(param1.data) > 0.5
+                    param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
             return DNA(dna, self.config), DNA(rna, self.config)
         else:
             raise Exception("DNA structure is not in the same Species")

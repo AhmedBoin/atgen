@@ -3,6 +3,7 @@ import math
 from typing import Dict, List, Tuple
 import torch.nn as nn
 from torch.nn import init
+import numpy as np
 
 
 from .layers import (
@@ -158,6 +159,12 @@ def shift_to_positive(arr):
 
 def log_level(val, level):
     for _ in range(level):
-        val = math.log2(val+1)
+        val = math.log(val+math.e-1)
     return val
+
+
+def stable_softmax(x: List[float]) -> np.ndarray:
+    x = np.array(x)
+    exps = np.exp(x - np.max(x))
+    return exps / np.sum(exps)
 

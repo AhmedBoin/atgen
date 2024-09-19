@@ -8,7 +8,7 @@ from tqdm import tqdm
 from .config import ATGENConfig
 from .dna import DNA
 
-from .utils import BLUE, RESET_COLOR, log_level
+from .utils import BLUE, RESET_COLOR, log_level, stable_softmax
 
 
 class Individual:
@@ -39,8 +39,8 @@ class Species:
         self.population.sort(key=lambda x: x.fitness, reverse=True)
 
     def calculate_shared(self):
-        fitness_values = numpy.exp([individual.fitness for individual in self.population])
-        normalized_fitness = fitness_values/sum(fitness_values)
+        fitness_values = [individual.fitness for individual in self.population]
+        normalized_fitness = stable_softmax(fitness_values)
         for individual, shared in zip(self.population, normalized_fitness):
             individual.shared = shared / log_level(self.groups[individual.id], self.config.log_level)
 
@@ -63,7 +63,11 @@ class Species:
         while True:
             id = random.choices(list(self.groups.keys()), list(self.groups.values()), k=1)[0]
             if self.groups[id] > 1:
-                parents = self.genome_group(id)[0][:2] if self.config.select_top_only else random.choices(*self.genome_group(id), k=2)
+                try:
+                    parents = self.genome_group(id)[0][:2] if self.config.select_top_only else random.choices(*self.genome_group(id), k=2)
+                except:
+                    print(self.genome_group(id))
+                    parents = self.genome_group(id)[0][:2] if self.config.select_top_only else random.choices(*self.genome_group(id), k=2)
                 return parents[0], parents[1]
             
     def append(self, dna: DNA):
@@ -105,4 +109,13 @@ class Species:
             raise TypeError(f"Invalid argument type: {type(index)}")
 
     
-
+    def exchange(self, offspring: Individual, fitness: float):
+        index = None
+        for i, individual in enumerate(self.population):
+            if individual.fitness == fitness:
+                index = i
+                break
+        self.population.pop(index)
+        self.population.append(offspring)
+        self.calculate_species()
+        self.calculate_shared()

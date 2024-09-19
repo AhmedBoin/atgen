@@ -15,3 +15,6 @@ parallelism fitness and training functions {cm:2024-09-17}
 make 2 function, before and after editing (crossover, mutation..) {cm:2024-09-17}
 add custom support example, like KAN and Resnet block
 implement symbolic regression
+4 images in row feed to the network, increase performance through time dimension
+custom implementation for KAN
+NeuroSymbolic
