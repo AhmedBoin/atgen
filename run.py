@@ -1,6 +1,5 @@
 from collections import deque
 import random
-import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -79,18 +78,17 @@ def vae_loss(reconstructed, original, mu, logvar):
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.6, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9, direct_crossover=False)
+        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9)
         super().__init__(population_size, model, config)
         self.autoencoder = VAE(latent_dim=10).to(device)
-        try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
-        except: pass
+        # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
+        # except: pass
         self.criterion = nn.MSELoss()
-        # self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
-        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-7)
+        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
         self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
         self.buffer = deque(maxlen=10_000)
         self.my_fitness = float("-inf")
-        self.steps = 10
+        self.steps = 50
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
@@ -105,7 +103,7 @@ class NeuroEvolution(ATGEN):
                 feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
                 action = model(feature).squeeze(0).detach().cpu().numpy()
                 state, reward, terminated, truncated, info = env.step(action)
-                total_reward += (reward*(1-np.tanh(np.abs(action[0])/5)))
+                total_reward += reward
                 
                 if terminated or truncated:
                     break
@@ -117,6 +115,8 @@ class NeuroEvolution(ATGEN):
         if self.my_fitness < self.best_fitness:
             self.my_fitness = self.best_fitness
             self.steps += 50
+        else:
+            self.steps += 10
         for epoch in range(50):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)

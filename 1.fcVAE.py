@@ -17,32 +17,48 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 game = "CarRacing-v2"
 device = "mps"
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 class VAE(nn.Module):
     def __init__(self, latent_dim=10):
         super(VAE, self).__init__()
+        
+        # Assuming input image size is 96x96x3
+        self.input_dim = 96 * 96 * 3
+        
+        # Encoder: Fully connected layers
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
+            nn.Linear(self.input_dim, 1024),  # Flattened input -> intermediate size
             nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1),  # [48, 48, 16] -> [24, 24, 32]
+            nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [12, 12, 64]
+            nn.Linear(512, 256),
             nn.ReLU(),
         )
-        self.fc_mu = nn.Linear(12 * 12 * 64, latent_dim)
-        self.fc_logvar = nn.Linear(12 * 12 * 64, latent_dim)
-        self.fc_decode = nn.Linear(latent_dim, 12 * 12 * 64)
+        
+        # Latent space: mean (mu) and log variance (logvar)
+        self.fc_mu = nn.Linear(256, latent_dim)
+        self.fc_logvar = nn.Linear(256, latent_dim)
+        
+        # Decoder: Fully connected layers
+        self.fc_decode = nn.Linear(latent_dim, 256)
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # [12, 12, 64] -> [24, 24, 32]
+            nn.Linear(256, 512),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [48, 48, 16]
+            nn.Linear(512, 1024),
             nn.ReLU(),
-            nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
-            nn.Sigmoid()
+            nn.Linear(1024, self.input_dim),  # Final output to match the flattened input
+            nn.Sigmoid()  # Output scaled between 0 and 1 for reconstruction
         )
     
     def encode(self, x):
+        # Flatten the input: [batch_size, 3, 96, 96] -> [batch_size, 3 * 96 * 96]
+        x = x.reshape(x.size(0), -1)
         x = self.encoder(x)
-        x = x.view(x.size(0), -1)
+        
+        # Latent space (mean and logvar)
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
         return mu, logvar
@@ -54,12 +70,16 @@ class VAE(nn.Module):
         return z
     
     def decode(self, z):
+        # Decode from latent space back to input dimensions
         x = self.fc_decode(z)
-        x = x.view(x.size(0), 64, 12, 12)
         x = self.decoder(x)
+        
+        # Reshape back to image format: [batch_size, 3, 96, 96]
+        x = x.reshape(x.size(0), 3, 96, 96)
         return x
     
     def forward(self, x):
+        # x = x + torch.rand_like(x) * 0.5
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         reconstructed = self.decode(z)
@@ -70,6 +90,12 @@ class VAE(nn.Module):
         mu, _ = self.encode(x)
         return mu
 
+    # def reduce(self, x):
+    #     """Use the encoder to extract the latent representation (mu)."""
+    #     mu, logvar = self.encode(x)
+    #     std = torch.exp(0.5 * logvar)
+    #     return torch.cat((mu, logvar, std), dim=1)
+
 # Loss function for VAE (Reconstruction loss + KL divergence)
 def vae_loss(reconstructed, original, mu, logvar):
     recon_loss = F.mse_loss(reconstructed, original, reduction='sum')
@@ -79,20 +105,21 @@ def vae_loss(reconstructed, original, mu, logvar):
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
         config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9)
+        # config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.3, perturbation_rate=0.3, mutation_decay=0.9, perturbation_decay=0.9)
         super().__init__(population_size, model, config)
-        self.autoencoder = VAE(latent_dim=10).to(device)
+        self.autoencoder = VAE(latent_dim=3).to(device)
         # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
         # except: pass
         self.criterion = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)#*(0.8**14))
         self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
         self.buffer = deque(maxlen=10_000)
         self.my_fitness = float("-inf")
-        self.steps = 50
+        self.steps = 10
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 1
+        epochs = 2
         env = gym.make(game, max_episode_steps=self.steps)
         total_reward = 0
         for _ in range(epochs):
@@ -112,9 +139,12 @@ class NeuroEvolution(ATGEN):
         return total_reward / epochs
     
     def pre_generation(self):
-        if self.my_fitness < self.best_fitness:
-            self.my_fitness = self.best_fitness
-            self.steps += 50
+        # if self.my_fitness < self.best_fitness:
+        #     self.my_fitness = self.best_fitness
+        #     self.steps += 50
+        # else:
+        #     self.steps += 10
+        self.steps += 50
         for epoch in range(50):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)
@@ -131,7 +161,7 @@ class NeuroEvolution(ATGEN):
 
 if __name__ == "__main__":
     model = nn.Sequential(
-        nn.Linear(10, 3), 
+        nn.Linear(3, 3), 
         nn.Tanh()
     ).to(device)
     ne = NeuroEvolution(50, model)

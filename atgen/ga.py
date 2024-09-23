@@ -33,6 +33,7 @@ class ATGEN:
         # Initialize the population
         dna: DNA = DNA(network, config)
         self.population: Species = Species(population_size, dna, config)
+        self.best_individual = self.population.population[0]
 
         # Preview results
         self.best_fitness = float("-inf")
@@ -50,6 +51,8 @@ class ATGEN:
             individual.fitness = self.fitness_fn(individual.model)
 
         self.population.sort_fitness()
+        if self.population.population[0].fitness > self.best_fitness:
+            self.best_individual = self.population.population[0]
         self.population.calculate_shared()
         if self.config.shared_fitness:
             self.population.sort_shared()
@@ -134,6 +137,7 @@ class ATGEN:
         results = self.preview_results()
         if self.config.save_every_generation and self.save_name is not None:
             self.save_population(self.save_name)
+            self.save_individual()
             self.config.save()
         
         # return if criteria reached
@@ -241,6 +245,7 @@ class ATGEN:
         
         if save_name is not None:
             self.save_population(save_name)
+            self.save_individual()
         
         if plot:
             plt.plot(range(len(mean)), mean, label='Mean Fitness')
@@ -287,6 +292,14 @@ class ATGEN:
     def load_population(self, file_name="population.pkl"):
         with open(f'{file_name}', 'rb') as file:
             self.population = pickle.load(file)
+
+    def save_individual(self, file_name="individual.pkl"):
+        with open(f'{file_name}', 'wb') as file:
+            pickle.dump(self.best_individual, file)
+
+    def load_individual(self, file_name="individual.pkl"):
+        with open(f'{file_name}', 'rb') as file:
+            self.best_individual = pickle.load(file)
     
     def continual_evolution(self, fitness):
         self.evaluate_fitness()

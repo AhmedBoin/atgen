@@ -27,11 +27,15 @@ class VAE(nn.Module):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [12, 12, 64]
             nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=4, stride=2, padding=1),  # [12, 12, 64] -> [6, 6, 64]
+            nn.ReLU(),
         )
-        self.fc_mu = nn.Linear(12 * 12 * 64, latent_dim)
-        self.fc_logvar = nn.Linear(12 * 12 * 64, latent_dim)
-        self.fc_decode = nn.Linear(latent_dim, 12 * 12 * 64)
+        self.conv_mu = nn.Conv2d(64, 1, kernel_size=1, stride=1)  # [6, 6, 64] -> [6, 6, 1]
+        self.conv_logvar = nn.Conv2d(64, 1, kernel_size=1, stride=1)  # [6, 6, 64] -> [6, 6, 1]
+        self.conv_decode = nn.ConvTranspose2d(1, 64, kernel_size=1, stride=1)  # [6, 6, 1] -> [6, 6, 64]
         self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 64, kernel_size=4, stride=2, padding=1),  # [6, 6, 64] -> [12, 12, 64]
+            nn.ReLU(),
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # [12, 12, 64] -> [24, 24, 32]
             nn.ReLU(),
             nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [48, 48, 16]
@@ -42,9 +46,8 @@ class VAE(nn.Module):
     
     def encode(self, x):
         x = self.encoder(x)
-        x = x.view(x.size(0), -1)
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
+        mu = self.conv_mu(x)
+        logvar = self.conv_logvar(x)
         return mu, logvar
     
     def reparameterize(self, mu, logvar):
@@ -54,8 +57,7 @@ class VAE(nn.Module):
         return z
     
     def decode(self, z):
-        x = self.fc_decode(z)
-        x = x.view(x.size(0), 64, 12, 12)
+        x = self.conv_decode(z)
         x = self.decoder(x)
         return x
     
@@ -68,7 +70,7 @@ class VAE(nn.Module):
     def reduce(self, x):
         """Use the encoder to extract the latent representation (mu)."""
         mu, _ = self.encode(x)
-        return mu
+        return mu.view(x.size(0), -1)
 
 # Loss function for VAE (Reconstruction loss + KL divergence)
 def vae_loss(reconstructed, original, mu, logvar):
@@ -81,8 +83,8 @@ class NeuroEvolution(ATGEN):
         config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9)
         super().__init__(population_size, model, config)
         self.autoencoder = VAE(latent_dim=10).to(device)
-        # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
-        # except: pass
+        try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
+        except: pass
         self.criterion = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
         self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
@@ -92,7 +94,7 @@ class NeuroEvolution(ATGEN):
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 1
+        epochs = 2
         env = gym.make(game, max_episode_steps=self.steps)
         total_reward = 0
         for _ in range(epochs):
@@ -115,6 +117,8 @@ class NeuroEvolution(ATGEN):
         if self.my_fitness < self.best_fitness:
             self.my_fitness = self.best_fitness
             self.steps += 50
+        else:
+            self.steps += 10
         for epoch in range(50):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)
@@ -131,12 +135,13 @@ class NeuroEvolution(ATGEN):
 
 if __name__ == "__main__":
     model = nn.Sequential(
-        nn.Linear(10, 3), 
+        nn.Linear(36, 3), 
         nn.Tanh()
     ).to(device)
     ne = NeuroEvolution(50, model)
-    # ne.load_population()
-    ne.evolve(fitness=1000, save_name="population.pkl", metrics=0, plot=True)
+    ne.load_population()
+    ne.load_individual()
+    # ne.evolve(fitness=1000, save_name="population.pkl", metrics=0, plot=True)
     
     # model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")
@@ -144,7 +149,7 @@ if __name__ == "__main__":
     total_reward = 0
     while True:
         for i, individual in enumerate(ne.population):
-            # individual = ne.population[12]
+            # individual = ne.best_individual
             while True:
                 with torch.no_grad():
                     action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()

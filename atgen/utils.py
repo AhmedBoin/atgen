@@ -165,6 +165,7 @@ def log_level(val, level):
 
 def stable_softmax(x: List[float]) -> np.ndarray:
     x = np.array(x)
-    exps = np.exp(x - np.max(x))
-    return exps / np.sum(exps)
+    # exps = np.exp(x - np.max(x))
+    # return exps / np.sum(exps)
+    return x - np.min(x) + 1
 

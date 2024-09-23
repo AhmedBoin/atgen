@@ -13,7 +13,8 @@ make species version of algorithm {cm:2024-09-14}
 check the fitness function accuracy {cm:2024-09-06}
 parallelism fitness and training functions {cm:2024-09-17}
 make 2 function, before and after editing (crossover, mutation..) {cm:2024-09-17}
-add custom support example, like KAN and Resnet block
+add custom support example, like KAN and Resnet block {cm:2024-09-20}
+multi step mutation
 implement symbolic regression
 4 images in row feed to the network, increase performance through time dimension
 custom implementation for KAN
