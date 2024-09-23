@@ -1,3 +1,9 @@
 {
-  "cSpell.words": ["logvar", "reparameterize", "tablefmt", "termcolor"]
+  "cSpell.words": [
+    "logvar",
+    "minmax",
+    "reparameterize",
+    "tablefmt",
+    "termcolor"
+  ]
 }

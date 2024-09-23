@@ -1,5 +1,6 @@
 from collections import deque
 import random
+import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -7,6 +8,8 @@ import torch.nn.functional as F
 from atgen.ga import ATGEN
 from atgen.config import ATGENConfig
 from atgen.layers.activations import ActiSwitch
+
+from PIL import Image
 
 import gymnasium as gym
 import warnings
@@ -21,7 +24,7 @@ class VAE(nn.Module):
     def __init__(self, latent_dim=10):
         super(VAE, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
+            nn.Conv2d(6, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1),  # [48, 48, 16] -> [24, 24, 32]
             nn.ReLU(),
@@ -36,7 +39,7 @@ class VAE(nn.Module):
             nn.ReLU(),
             nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [48, 48, 16]
             nn.ReLU(),
-            nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
+            nn.ConvTranspose2d(16, 6, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
             nn.Sigmoid()
         )
     
@@ -78,11 +81,11 @@ def vae_loss(reconstructed, original, mu, logvar):
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9)
+        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9, deeper_mutation=0.01, parent_mutation=False)
         super().__init__(population_size, model, config)
         self.autoencoder = VAE(latent_dim=10).to(device)
-        # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
-        # except: pass
+        try: self.autoencoder.oad_state_dict(torch.load("autoencoder.pth"))
+        except: pass
         self.criterion = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
         self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
@@ -92,13 +95,18 @@ class NeuroEvolution(ATGEN):
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 1
+        epochs = 2
         env = gym.make(game, max_episode_steps=self.steps)
         total_reward = 0
         for _ in range(epochs):
             state, info = env.reset()
+            memory = deque(maxlen=6)
+            for _ in range(5):
+                memory.append(np.asarray(Image.fromarray(state).convert('L')))
             while True:
-                state = torch.FloatTensor(state/255).permute(2, 0, 1)
+                memory.append(np.asarray(Image.fromarray(state).convert('L')))
+                state = np.stack(memory, 0)
+                state = torch.FloatTensor(state/255)#.permute(2, 0, 1)
                 self.buffer.append(state)
                 feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
                 action = model(feature).squeeze(0).detach().cpu().numpy()
@@ -137,25 +145,34 @@ if __name__ == "__main__":
         nn.Tanh()
     ).to(device)
     ne = NeuroEvolution(50, model)
-    # ne.load_population()
-    ne.evolve(fitness=1000, save_name="population.pkl", metrics=0, plot=True)
+    ne.load_population()
+    ne.load_individual()
+    # ne.evolve(fitness=1000, save_name="population.pkl", metrics=0, plot=True)
     
     # model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")
     state, info = env.reset()
+    memory = deque(maxlen=6)
+    for _ in range(5):
+        memory.append(np.asarray(Image.fromarray(state).convert('L')))
     total_reward = 0
     while True:
         for i, individual in enumerate(ne.population):
-            # individual = ne.population[12]
+            # individual = ne.best_individual
             while True:
                 with torch.no_grad():
-                    action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
+                    memory.append(np.asarray(Image.fromarray(state).convert('L')))
+                    state = np.stack(memory, 0)
+                    state = torch.FloatTensor(state/255)#.permute(2, 0, 1)
+                    action = individual.model(ne.autoencoder.reduce(state.unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:
                         print(f"{i} reward: {total_reward}")
                         total_reward = 0
                         state, info = env.reset()
+                        for _ in range(5):
+                            memory.append(np.asarray(Image.fromarray(state).convert('L')))
                         break
 
     

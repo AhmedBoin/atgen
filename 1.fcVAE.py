@@ -89,12 +89,7 @@ class VAE(nn.Module):
         """Use the encoder to extract the latent representation (mu)."""
         mu, _ = self.encode(x)
         return mu
-
-    # def reduce(self, x):
-    #     """Use the encoder to extract the latent representation (mu)."""
-    #     mu, logvar = self.encode(x)
-    #     std = torch.exp(0.5 * logvar)
-    #     return torch.cat((mu, logvar, std), dim=1)
+    
 
 # Loss function for VAE (Reconstruction loss + KL divergence)
 def vae_loss(reconstructed, original, mu, logvar):
@@ -104,8 +99,7 @@ def vae_loss(reconstructed, original, mu, logvar):
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9)
-        # config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.3, perturbation_rate=0.3, mutation_decay=0.9, perturbation_decay=0.9)
+        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.9, perturbation_decay=0.9, deeper_mutation=0.01)
         super().__init__(population_size, model, config)
         self.autoencoder = VAE(latent_dim=3).to(device)
         # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
@@ -139,12 +133,12 @@ class NeuroEvolution(ATGEN):
         return total_reward / epochs
     
     def pre_generation(self):
-        # if self.my_fitness < self.best_fitness:
-        #     self.my_fitness = self.best_fitness
-        #     self.steps += 50
-        # else:
-        #     self.steps += 10
-        self.steps += 50
+        if self.my_fitness < self.best_fitness:
+            self.my_fitness = self.best_fitness
+            self.steps += 50
+        else:
+            self.steps += 10
+        # self.steps += 50
         for epoch in range(50):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)
