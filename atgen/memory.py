@@ -3,6 +3,7 @@ from typing import List
 import torch
 from torch import nn
 import torch.nn.functional as F
+import math
 
 
 class Action:
@@ -13,25 +14,27 @@ class Action:
 
 class ContainerBuffer:
     def __init__(self, state, action, reward=None, action_type=Action.Normal):
-        self.state: torch.Tensor = torch.concat(state, dim=0)
-        self.action: torch.Tensor = torch.concat(action, dim=0)
+        self.state: torch.Tensor = torch.concat(tuple(state), dim=0)
+        self.action: torch.Tensor = torch.concat(tuple(action), dim=0)
         self.reward: torch.Tensor = reward if reward is None else torch.tensor(reward)
         self.action_type = action_type
 
 
 def hamming_distance(old_actions: torch.Tensor, new_actions: torch.Tensor) -> float:
     """Calculate Hamming Distance of discrete actions"""
-    return 1 - (old_actions == new_actions).mean().item()
+    return 1 - (old_actions == new_actions).mean(dtype=torch.float32).item()
 
 
 def euclidean_distances(batch1: torch.Tensor, batch2: torch.Tensor, method='zscore', scale_range=(-1, 1)) -> float:
+    """Calculate Euclidean Distance of Continues actions"""
     combined_batches = torch.cat([batch1, batch2], dim=0)
     
     if method == 'minmax':
+        min_scale, max_scale = min(scale_range), max(scale_range)
         min_val = combined_batches.min(dim=0, keepdim=True)[0]
         max_val = combined_batches.max(dim=0, keepdim=True)[0]
-        normalized_batch1 = scale_range[0] + (batch1 - min_val) * (scale_range[1] - scale_range[0]) / (max_val - min_val)
-        normalized_batch2 = scale_range[0] + (batch2 - min_val) * (scale_range[1] - scale_range[0]) / (max_val - min_val)
+        normalized_batch1 = min_scale + (batch1 - min_val) * (max_scale - min_scale) / (max_val - min_val)
+        normalized_batch2 = min_scale + (batch2 - min_val) * (max_scale - min_scale) / (max_val - min_val)
     elif method == 'zscore':
         mean = combined_batches.mean(dim=0, keepdim=True)
         std = combined_batches.std(dim=0, keepdim=True)
@@ -60,8 +63,8 @@ class ReplayBuffer:
         self.method = method
         self.scale_range = scale_range
 
-        self.upper_bound = reward_range[0]
-        self.lower_bound = reward_range[1]
+        self.upper_bound = max(reward_range)
+        self.lower_bound = min(reward_range)
         self.currant_action = Action.Normal
 
         self.average_distance = average_distance
@@ -170,7 +173,7 @@ class ReplayBuffer:
     
 
 if __name__ == "__main__":
-    # Test replay buffer initialization
+    
     def test_replay_buffer_initialization():
         buffer = ReplayBuffer(buffer_size=10, steps=5)
         assert len(buffer) == 0, "Buffer should be empty on initialization"
@@ -178,7 +181,6 @@ if __name__ == "__main__":
         assert buffer.buffer_size == 10, "Buffer size should be set correctly"
         print("test_replay_buffer_initialization passed")
 
-    # Test adding steps and tracking rewards
     def test_track_rewards():
         buffer = ReplayBuffer(buffer_size=10, steps=3, reward_range=(5, -5))
         state = [torch.rand(1, 4) for _ in range(3)]
@@ -193,7 +195,6 @@ if __name__ == "__main__":
         assert buffer.buffer[1].action_type == Action.Bad, "Second entry should be Bad action"
         print("test_track_rewards passed")
 
-    # Test signaling method
     def test_signal_method():
         buffer = ReplayBuffer(buffer_size=5, prioritize=True)
         state = [torch.rand(1, 4) for _ in range(3)]
@@ -207,7 +208,6 @@ if __name__ == "__main__":
         assert buffer.buffer[0].action_type == Action.Good, "Entry should be of Good action type"
         print("test_signal_method passed")
 
-    # Test validation method with dummy model (identity model)
     def test_validate():
         buffer = ReplayBuffer(buffer_size=5, steps=2, discrete_action=False)
         state = [torch.rand(1, 4) for _ in range(2)]
@@ -222,7 +222,6 @@ if __name__ == "__main__":
         assert not is_valid, "Validation should fail as model isn't trained"
         print("test_validate passed")
 
-    # Test clear buffer
     def test_clear_buffer():
         buffer = ReplayBuffer(buffer_size=5, steps=3)
         state = [torch.rand(1, 4) for _ in range(3)]
@@ -236,28 +235,25 @@ if __name__ == "__main__":
         assert len(buffer) == 0, "Buffer should be empty after clearing"
         print("test_clear_buffer passed")
 
-    # Test hamming distance
     def test_hamming_distance():
         old_actions = torch.tensor([1, 0, 1, 0, 1])
         new_actions = torch.tensor([1, 1, 1, 0, 1])
         dist = hamming_distance(old_actions, new_actions)
-        assert dist == 0.2, f"Hamming distance should be 0.2, got {dist}"
+        assert math.isclose(dist, 0.2, rel_tol=1e-5), f"Hamming distance should be 0.2, got {dist}"
         print("test_hamming_distance passed")
 
-    # Test Euclidean distances with zscore normalization
     def test_euclidean_distances_zscore():
-        batch1 = torch.tensor([[1., 2.], [3., 4.]])
-        batch2 = torch.tensor([[1., 2.], [3., 4.]])
+        batch1 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        batch2 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         dist = euclidean_distances(batch1, batch2, method='zscore')
-        assert dist == 0.0, f"Euclidean distance should be 0.0 for identical batches, got {dist}"
+        assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"Euclidean distance should be 0.0 for identical batches, got {dist}"
         print("test_euclidean_distances_zscore passed")
 
-    # Test Euclidean distances with min-max normalization
     def test_euclidean_distances_minmax():
         batch1 = torch.tensor([[1., 2.], [3., 4.]])
         batch2 = torch.tensor([[1., 2.], [3., 4.]])
         dist = euclidean_distances(batch1, batch2, method='minmax', scale_range=(0, 1))
-        assert dist == 0.0, f"Euclidean distance should be 0.0 for identical batches, got {dist}"
+        assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"Euclidean distance should be 0.0 for identical batches, got {dist}"
         print("test_euclidean_distances_minmax passed")
 
     # Run all the tests
