@@ -519,49 +519,136 @@ import torch.nn.functional as F
 
 ###########################################################################################################################
 
-def track_rewards(rewards, upper_bound, lower_bound):
-    """
-    Track rewards and detect transitions to good/bad actions based on bounds.
-    Transitions happen immediately if rewards cross either bound.
+# def track_rewards(rewards, upper_bound, lower_bound):
+#     """
+#     Track rewards and detect transitions to good/bad actions based on bounds.
+#     Transitions happen immediately if rewards cross either bound.
     
-    :param rewards: List of rewards.
-    :param upper_bound: Upper bound for good actions.
-    :param lower_bound: Lower bound for bad actions.
-    :return: Two lists: one with indices of good actions and another with indices of bad actions.
-    """
-    good_actions = []
-    bad_actions = []
-    state = "normal"  # Start in the normal state
+#     :param rewards: List of rewards.
+#     :param upper_bound: Upper bound for good actions.
+#     :param lower_bound: Lower bound for bad actions.
+#     :return: Two lists: one with indices of good actions and another with indices of bad actions.
+#     """
+#     good_actions = []
+#     bad_actions = []
+#     state = "normal"  # Start in the normal state
     
-    for i, reward in enumerate(rewards):
-        if reward > upper_bound:
-            if state != "above": good_actions.append(i)
-            state = "above"
-        elif reward < lower_bound:
-            if state != "below": bad_actions.append(i)
-            state = "below"
-        else:
-            state = "normal"
+#     for i, reward in enumerate(rewards):
+#         if reward > upper_bound:
+#             if state != "above": good_actions.append(i)
+#             state = "above"
+#         elif reward < lower_bound:
+#             if state != "below": bad_actions.append(i)
+#             state = "below"
+#         else:
+#             state = "normal"
         
-    return good_actions, bad_actions
+#     return good_actions, bad_actions
 
 
-# Example reward sequences from different games
-custom_game_rewards = [1, 2, 2.5, 3, 3.1, 10, 3.2, 3.1, 3.0, 0]  # Custom game
-carracing_rewards = [1, 1, 2, 1, 1, -1, -1, -1, -1, -1, 1, 1, 2]  # CarRacing
-lunarlander_rewards = [-0.3, -1, -0.3, -0.3, 0, -1, -0.3, 0, 200]  # LunarLander
+# # Example reward sequences from different games
+# custom_game_rewards = [1, 2, 2.5, 3, 3.1, 10, 3.2, 3.1, 3.0, 0]  # Custom game
+# carracing_rewards = [1, 1, 2, 1, 1, -1, -1, -1, -1, -1, 1, 1, 2]  # CarRacing
+# lunarlander_rewards = [-0.3, -1, -0.3, -0.3, 0, -1, -0.3, 0, 200]  # LunarLander
 
-# Track rewards for each game
-custom_game_good, custom_game_bad = track_rewards(custom_game_rewards, upper_bound=5, lower_bound=0.5)
-carracing_good, carracing_bad = track_rewards(carracing_rewards, upper_bound=0.1, lower_bound=-0.1)
-lunarlander_good, lunarlander_bad = track_rewards(lunarlander_rewards, upper_bound=100, lower_bound=-5)
+# # Track rewards for each game
+# custom_game_good, custom_game_bad = track_rewards(custom_game_rewards, upper_bound=5, lower_bound=0.5)
+# carracing_good, carracing_bad = track_rewards(carracing_rewards, upper_bound=0.1, lower_bound=-0.1)
+# lunarlander_good, lunarlander_bad = track_rewards(lunarlander_rewards, upper_bound=100, lower_bound=-5)
 
-# Display results
-print("Custom Game Good Actions:", custom_game_good)
-print("Custom Game Bad Actions:", custom_game_bad)
+# # Display results
+# print("Custom Game Good Actions:", custom_game_good)
+# print("Custom Game Bad Actions:", custom_game_bad)
 
-print("CarRacing Good Actions:", carracing_good)
-print("CarRacing Bad Actions:", carracing_bad)
+# print("CarRacing Good Actions:", carracing_good)
+# print("CarRacing Bad Actions:", carracing_bad)
 
-print("LunarLander Good Actions:", lunarlander_good)
-print("LunarLander Bad Actions:", lunarlander_bad)
+# print("LunarLander Good Actions:", lunarlander_good)
+# print("LunarLander Bad Actions:", lunarlander_bad)
+
+
+
+# import torch
+# import torch.nn.functional as F
+
+# # 1. Convert to one-hot vectors
+# def convert_to_one_hot(action_series, num_actions=4):
+#     return F.one_hot(torch.tensor(action_series), num_classes=num_actions).float()
+
+# # 2. Apply Exponential Moving Average (EMA) smoothing
+# def smooth_actions_ema(one_hot_actions, smoothing_factor=0.25):
+#     smoothed = torch.zeros_like(one_hot_actions)
+#     smoothed[0] = one_hot_actions[0]  # Initialize with the first action
+#     for i in range(1, len(one_hot_actions)):
+#         smoothed[i] = smoothing_factor * one_hot_actions[i] + (1 - smoothing_factor) * smoothed[i - 1]
+#     return smoothed
+
+# # 3. Calculate Euclidean distance between two sequences
+# def euclidean_distance(seq1, seq2):
+#     return torch.sqrt(torch.sum((seq1 - seq2) ** 2, dim=1)).mean().item()
+
+# # Example usage:
+# action_series1 = [1, 1, 2, 0, 0, 2, 3, 2, 2, 3, 1, 1, 0]
+# action_series2 = [1, 2, 2, 0, 1, 2, 3, 2, 1, 3, 1, 0, 0]
+
+# # Convert to one-hot
+# one_hot1 = convert_to_one_hot(action_series1)
+# one_hot2 = convert_to_one_hot(action_series2)
+# print("One-hot vectors:")
+# print(one_hot1)
+# print(one_hot2)
+
+# # Apply EMA smoothing
+# smoothed1 = smooth_actions_ema(one_hot1, smoothing_factor=0.3)
+# smoothed2 = smooth_actions_ema(one_hot2, smoothing_factor=0.3)
+# print("\nSmoothed one-hot vectors:")
+# print(smoothed1)
+# print(smoothed2)
+
+# # Calculate Euclidean distance
+# distance = euclidean_distance(smoothed1, smoothed2)
+# print(f"Euclidean Distance: {distance}")
+
+
+# import torch
+
+# def calculate_balanced_ratio(distances: torch.Tensor, labels: torch.Tensor, epsilon=1e-8):
+#     """
+#     Calculate a ratio that reflects how balanced positive and negative distances are.
+    
+#     :param distances: Tensor of shape (n,), where n is the number of vectors.
+#                       Contains the Euclidean distances between corresponding vectors.
+#     :param labels: Tensor of shape (n,), containing 1 for positive examples and 0 for negative examples.
+#     :param epsilon: Small value to prevent division by zero.
+    
+#     :return: A ratio that reflects balance: near 1 if positive and negative distances are close,
+#              near 0 if there's a significant difference.
+#     """
+#     # Separate distances for positive and negative examples
+#     positive_distances = distances[labels == 1]
+#     negative_distances = distances[labels == 0]
+    
+#     # Calculate mean distances
+#     mean_positive_distance = positive_distances.mean().item()
+#     mean_negative_distance = negative_distances.mean().item()
+    
+#     # Calculate the absolute difference and sum
+#     abs_difference = abs(mean_positive_distance - mean_negative_distance)
+#     total_distance = mean_positive_distance + mean_negative_distance
+    
+#     # Avoid division by zero by adding a small epsilon
+#     if total_distance == 0:
+#         return 1.0  # Both distances are zero, return max ratio (perfect balance)
+    
+#     # Calculate the ratio: closer to 1 if distances are balanced, closer to 0 if they are different
+#     ratio = 1 - (abs_difference / (total_distance + epsilon))
+    
+#     return ratio
+
+# # Example usage
+# distances = torch.tensor([0.1, 0.2, 0.3, 1.5, 2.0] * 10)
+# labels = torch.tensor([1, 0, 1, 0, 1] * 10)
+
+# # Calculate the ratio
+# balanced_ratio = calculate_balanced_ratio(distances, labels)
+# print(f"Balanced ratio: {balanced_ratio:.4f}")

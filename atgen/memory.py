@@ -15,17 +15,34 @@ class Action:
 class ContainerBuffer:
     def __init__(self, state, action, reward=None, action_type=Action.Normal):
         self.state: torch.Tensor = torch.concat(tuple(state), dim=0)
-        self.action: torch.Tensor = torch.concat(tuple(action), dim=0)
+        self.action: torch.Tensor = torch.stack(tuple(action), dim=0)
         self.reward: torch.Tensor = reward if reward is None else torch.tensor(reward)
         self.action_type = action_type
 
+    def __str__(self) -> str:
+        return f"Container(state: {self.state}, action: {self.action}, reward: {self.reward}, type: {self.action_type})"
 
-def hamming_distance(old_actions: torch.Tensor, new_actions: torch.Tensor) -> float:
+
+def discrete_distance(old_actions: torch.Tensor, new_actions: torch.Tensor, actions: int, method='zscore') -> float:
     """Calculate Hamming Distance of discrete actions"""
-    return 1 - (old_actions == new_actions).mean(dtype=torch.float32).item()
+    # 1. Convert to one-hot vectors
+    old_actions = F.one_hot(old_actions, num_classes=actions).float()
+    new_actions = F.one_hot(new_actions, num_classes=actions).float()
+    # 2. Apply Exponential Moving Average (EMA) smoothing
+    smoothing_factor = 1/actions
+    old_smoothed = torch.zeros_like(old_actions)
+    old_smoothed[0] = old_actions[0]
+    for i in range(1, len(old_actions)):
+        old_smoothed[i] = smoothing_factor * old_actions[i] + (1 - smoothing_factor) * old_smoothed[i - 1]
+    new_smoothed = torch.zeros_like(new_actions)
+    new_smoothed[0] = new_actions[0]
+    for i in range(1, len(new_actions)):
+        new_smoothed[i] = smoothing_factor * new_actions[i] + (1 - smoothing_factor) * new_smoothed[i - 1]
+    # 3. Calculate Euclidean distance between two sequences
+    return continues_distance(old_smoothed, new_smoothed, method)
 
 
-def euclidean_distances(batch1: torch.Tensor, batch2: torch.Tensor, method='zscore', scale_range=(-1, 1)) -> float:
+def continues_distance(batch1: torch.Tensor, batch2: torch.Tensor, method='zscore', scale_range=(-1, 1)) -> float:
     """Calculate Euclidean Distance of Continues actions"""
     combined_batches = torch.cat([batch1, batch2], dim=0)
     
@@ -43,13 +60,13 @@ def euclidean_distances(batch1: torch.Tensor, batch2: torch.Tensor, method='zsco
     else:
         raise ValueError(f"Unknown normalizing method: {method}")
     
-    return F.pairwise_distance(normalized_batch1, normalized_batch2).mean().item()
+    return (F.cosine_similarity(normalized_batch1, normalized_batch2).mean().item() + 1) / 2
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size: int, steps: int = 5, discrete_action: bool = False, 
+    def __init__(self, buffer_size: int=0, steps: int = 0, discrete_action: bool = False, 
                  threshold: float = 0.3, method='zscore', scale_range=(-1, 1), reward_range=(0, 0),
-                 average_distance: bool = False, prioritize: bool = False):
+                 average_distance: bool = True, prioritize: bool = False):
         
         self.buffer_size = buffer_size
         self.steps = steps
@@ -87,17 +104,16 @@ class ReplayBuffer:
                     if action_type == Action.Good:
                         if sum(container.reward) < reward:
                             reward, idx = sum(container.reward), i
-                    if action_type == Action.Bad:
+                    elif action_type == Action.Bad:
                         if sum(container.reward) > reward:
                             reward, idx = sum(container.reward), i
 
                 if idx is not None:
-                    self.buffer.pop(idx)
-                    self.buffer.append(ContainerBuffer(self.state, self.action, self.reward, action_type))
+                    self.buffer[idx] = ContainerBuffer(self.state, self.action, self.reward, action_type)
             else:
                 self.buffer.append(ContainerBuffer(self.state, self.action, self.reward, action_type))
         else:
-            self.buffer.append(ContainerBuffer(self.state, self.action,  self.reward, action_type))
+            self.buffer.append(ContainerBuffer(self.state, self.action, self.reward, action_type))
 
     def track(self, state, action, reward):
         while len(self.state) < self.steps:
@@ -115,57 +131,61 @@ class ReplayBuffer:
             self.currant_action = Action.Bad
         else:
             self.currant_action = Action.Normal
-
-    def _pre_validate(self):
-        self.good_state, self.good_action, self.bad_state, self.bad_action = [], [], [], []
-        for container in self.buffer:
-            if container.action_type == Action.Good:
-                self.good_state.append(container.state)
-                self.good_action.append(container.action)
-            if container.action_type == Action.Good:
-                self.bad_state.append(container.state)
-                self.bad_action.append(container.action)
-        self._prepared = True
         
 
     @torch.no_grad()
     def validate(self, model: nn.Sequential) -> bool:
         device = model.parameters().__next__().device
         if self.average_distance:
-            if not self._prepared:
-                self._pre_validate()
-            good_states = torch.concat(self.good_state).to(device)
-            good_actions = torch.concat(self.good_action).to(device)
-            good_new_action: torch.Tensor = model(good_states)
-            bad_states = torch.concat(self.bad_state).to(device)
-            bad_actions = torch.concat(self.bad_action).to(device)
-            bad_new_action: torch.Tensor = model(bad_states)
-            if self.discrete_action:
-                distance = (hamming_distance(good_actions, good_new_action.argmax(1)) * len(self.good_state) +
-                            hamming_distance(bad_actions, bad_new_action.argmax(1)) * len(self.bad_state)) / len(self)
+            good_state, good_action, bad_state, bad_action = [], [], [], []
+            for container in self.buffer:
+                if container.action_type == Action.Good:
+                    good_state.append(container.state)
+                    good_action.append(container.action)
+                if container.action_type == Action.Bad:
+                    bad_state.append(container.state)
+                    bad_action.append(container.action)
+            g_distance, b_distance = 0, 0
+            if good_state:
+                good_states = torch.concat(good_state).to(device)
+                good_actions = torch.concat(good_action).to(device)
+                good_new_action: torch.Tensor = model(good_states)
+                if self.discrete_action:
+                    g_distance = discrete_distance(good_actions, good_new_action.argmax(1), good_new_action.shape[1], self.method) * len(good_state)
+                else:
+                    g_distance = continues_distance(good_actions, good_new_action, self.method, self.scale_range) * len(good_state)
+            if bad_state:
+                bad_states = torch.concat(bad_state).to(device)
+                bad_actions = torch.concat(bad_action).to(device)
+                bad_new_action: torch.Tensor = model(bad_states)
+                if self.discrete_action:
+                    b_distance = (1-discrete_distance(bad_actions, bad_new_action.argmax(1), bad_new_action.shape[1], self.method)) * len(bad_state)
+                else:
+                    b_distance = (1-continues_distance(bad_actions, bad_new_action, self.method, self.scale_range)) * len(bad_state)
+            if len(self.buffer) > 0:
+                distance = (g_distance + b_distance) / len(self.buffer)
+                # distance = 1 - (abs(g_distance - b_distance) / (g_distance + b_distance + 1e-8))
+                return distance < self.threshold 
             else:
-                distance = (euclidean_distances(good_actions, new_action, self.method, self.scale_range) * len(self.good_state) + 
-                            euclidean_distances(bad_actions, new_action, self.method, self.scale_range) * len(self.bad_state)) / len(self)
-            return distance > self.threshold
+                return True
         else:
             for container in self.buffer:
                 new_action: torch.Tensor = model(container.state)
                 if self.discrete_action:
-                    distance = hamming_distance(container.action, new_action.argmax(1))
+                    distance = discrete_distance(container.action, new_action.argmax(1), new_action.shape[1], self.method)
                 else:
-                    distance = euclidean_distances(container.action, new_action, self.method, self.scale_range)
+                    distance = continues_distance(container.action, new_action, self.method, self.scale_range)
                 if (container.action_type == Action.Good) and (distance > self.threshold):
-                    return False
+                    return False 
                 elif (container.action_type == Action.Bad) and (distance < self.threshold):
-                    return False
-            return True
+                    return False 
+            return True 
         
     def clear(self):
         self.buffer.clear()
         self.state.clear()
         self.action.clear()
         self.reward.clear()
-        self.good_state, self.good_action, self.bad_state, self.bad_action = [], [], [], []
         self.currant_action = Action.Normal
 
     def __len__(self) -> int:
@@ -235,26 +255,26 @@ if __name__ == "__main__":
         assert len(buffer) == 0, "Buffer should be empty after clearing"
         print("test_clear_buffer passed")
 
-    def test_hamming_distance():
+    def test_discrete_distance():
         old_actions = torch.tensor([1, 0, 1, 0, 1])
         new_actions = torch.tensor([1, 1, 1, 0, 1])
-        dist = hamming_distance(old_actions, new_actions)
+        dist = discrete_distance(old_actions, new_actions)
         assert math.isclose(dist, 0.2, rel_tol=1e-5), f"Hamming distance should be 0.2, got {dist}"
-        print("test_hamming_distance passed")
+        print("test_discrete_distance passed")
 
-    def test_euclidean_distances_zscore():
+    def test_continues_distance_zscore():
         batch1 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         batch2 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-        dist = euclidean_distances(batch1, batch2, method='zscore')
+        dist = continues_distance(batch1, batch2, method='zscore')
         assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"Euclidean distance should be 0.0 for identical batches, got {dist}"
-        print("test_euclidean_distances_zscore passed")
+        print("test_continues_distance_zscore passed")
 
-    def test_euclidean_distances_minmax():
+    def test_continues_distance_minmax():
         batch1 = torch.tensor([[1., 2.], [3., 4.]])
         batch2 = torch.tensor([[1., 2.], [3., 4.]])
-        dist = euclidean_distances(batch1, batch2, method='minmax', scale_range=(0, 1))
+        dist = continues_distance(batch1, batch2, method='minmax', scale_range=(0, 1))
         assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"Euclidean distance should be 0.0 for identical batches, got {dist}"
-        print("test_euclidean_distances_minmax passed")
+        print("test_continues_distance_minmax passed")
 
     # Run all the tests
     test_replay_buffer_initialization()
@@ -262,8 +282,8 @@ if __name__ == "__main__":
     test_signal_method()
     test_validate()
     test_clear_buffer()
-    test_hamming_distance()
-    test_euclidean_distances_zscore()
-    test_euclidean_distances_minmax()
+    test_discrete_distance()
+    test_continues_distance_zscore()
+    test_continues_distance_minmax()
     
     print("All tests passed!")

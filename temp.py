@@ -18,7 +18,7 @@ from .species import Individual, Species
 from .dna import DNA
 from .config import ATGENConfig
 from .utils import RESET_COLOR, BLUE, GREEN, RED, BOLD, GRAY, print_stats_table
-from .memory import Action, ReplayBuffer
+from .memory import ReplayBuffer
 
 
 import warnings
@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN:
-    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), memory=ReplayBuffer()):
+    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), memory: ReplayBuffer = None):
         self.population_size = population_size
         self.config = config
         self.memory = memory
@@ -146,20 +146,9 @@ class ATGEN:
         # return if criteria reached
         if self.check_criteria(results):
             return results
-
-        # use best genome to create experiences
-        if self.is_overridden("experiences_fn"):
-            print(f"{BLUE}Updating Experience Buffer...{RESET_COLOR}:", end=" ")
-            good_action_size = len([c.action_type for c in self.memory.buffer if c.action_type == Action.Good])
-            print(f"memory size: {len(self.memory)}, Good Action Size: {good_action_size}, Bad Action Size: {len(self.memory)-good_action_size}", end="\r")
-            self.experiences_fn(self.population.best_individual())
-            good_action_size = len([c.action_type for c in self.memory.buffer if c.action_type == Action.Good])
-            print(f"{BLUE}Updating Experience Buffer...{RESET_COLOR}:", end=" ")
-            print(f"memory size: {len(self.memory)}, Good Action Size: {good_action_size}, Bad Action Size: {len(self.memory)-good_action_size}          ")
         
         # implement pre_generation if required
         if self.is_overridden("pre_generation"):
-            print(f"{BLUE}Pre-Generation Fn in Execution...{RESET_COLOR}")
             self.pre_generation()
         
         # Sort and Select top percent
@@ -185,14 +174,13 @@ class ATGEN:
                 for i in range(math.ceil(repeat/2)):
                     passed = False
                     while not passed:
-                        parent1, parent2 = self.select_parents()
-                        offspring1, offspring2 = self.crossover(parent1, parent2)
-                        self.mutate(offspring1)
-                        self.mutate(offspring2)
-                        passed = self.memory.validate(offspring1.reconstruct()) and self.memory.validate(offspring2.reconstruct())
+                    parent1, parent2 = self.select_parents()
+                    offspring1, offspring2 = self.crossover(parent1, parent2)
+                    self.mutate(offspring1)
                     offsprings.append(offspring1)
                     pbar.update(1)
                     if not ((i == math.ceil(repeat/2)-1) and ((repeat%2) == 1)):
+                        self.mutate(offspring2)
                         offsprings.append(offspring2)
                         pbar.update(1)
 
@@ -200,11 +188,8 @@ class ATGEN:
             if self.config.parent_mutation:
                 parents: List[DNA] = []
                 for individual in self.population:
-                    passed = False
-                    while not passed:
-                        dna = copy.deepcopy(individual.dna)
-                        self.mutate(dna)
-                        passed = self.memory.validate(dna.reconstruct())
+                    dna = copy.deepcopy(individual.dna)
+                    self.mutate(dna)
                     parents.append(dna)
                     pbar.update(1)
                 self.population.clear()
@@ -214,12 +199,14 @@ class ATGEN:
 
         # implement post_generation if required
         if self.is_overridden("post_generation"):
-            print(f"{BLUE}Post-Generation Fn in Execution...{RESET_COLOR}")
             self.post_generation()
+
+        # use best genome to create experiences
+        if self.is_overridden("experiences_fn"):
+            self.experiences_fn(self.population.best_individual())
 
         # smooth the generation networks a little back propagation based method
         if self.is_overridden("backprob_fn"):
-            print(f"{BLUE}Back-Propagation phase in Execution.{RESET_COLOR}")
             self.evaluate_learn()
 
         # config modification
