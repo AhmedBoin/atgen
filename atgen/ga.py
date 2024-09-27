@@ -44,6 +44,7 @@ class ATGEN:
         self.last_fitness = float("-inf")
         self.worst_shared = float("-inf")
         self.required_fitness: float = None
+        self.fitness_reached = False # avoid double criteria check (avoid double difficulty)
 
     @torch.no_grad()
     def evaluate_fitness(self):
@@ -149,9 +150,6 @@ class ATGEN:
         results = self.preview_results()
         if self.config.save_every_generation and self.save_name is not None:
             self.save(self.save_name)
-            self.save_population()
-            self.save_individual()
-            self.config.save()
         
         # return if criteria reached
         if self.check_criteria(results):
@@ -238,7 +236,12 @@ class ATGEN:
             if results[self.metrics] >= self.required_fitness:
                 if self.config.current_difficulty < self.config.difficulty:
                     self.config.current_difficulty += 1
+                    self.memory.clear()
+                    self.best_fitness = float("-inf")
+                    self.last_fitness = float("-inf")
+                    self.worst_shared = float("-inf")
                 elif self.config.current_difficulty == self.config.difficulty:
+                    self.fitness_reached = True
                     print(f"--- {BLUE}Fitness reached{RESET_COLOR} ---\n")
                     return True
         return False
@@ -257,7 +260,7 @@ class ATGEN:
                     maximum.append(results[0])
                     mean.append(results[1])
                     minimum.append(results[2])
-                    if self.check_criteria(results):
+                    if self.fitness_reached:
                         break
         # reach fitness if no generation number required
         elif fitness is not None:
@@ -269,7 +272,7 @@ class ATGEN:
                 maximum.append(results[0])
                 mean.append(results[1])
                 minimum.append(results[2])
-                if self.check_criteria(results):
+                if self.fitness_reached:
                     break
         # break if no given generation number or fitness value
         else:
@@ -310,24 +313,24 @@ class ATGEN:
     def post_generation(self):
         raise NotImplementedError("implement post_generation method")
 
-    def save_population(self, file_name="population.pkl"):
+    def save_population(self, file_name):
         with open(f'{file_name}', 'wb') as file:
             pickle.dump(self.population, file)
 
-    def load_population(self, file_name="population.pkl"):
+    def load_population(self, file_name):
         with open(f'{file_name}', 'rb') as file:
             self.population = pickle.load(file)
 
-    def save_individual(self, file_name="individual.pkl"):
+    def save_individual(self, file_name):
         with open(f'{file_name}', 'wb') as file:
             pickle.dump(self.best_individual, file)
 
-    def load_individual(self, file_name="individual.pkl"):
+    def load_individual(self, file_name):
         with open(f'{file_name}', 'rb') as file:
             self.best_individual = pickle.load(file)
 
     def save(self, directory="model", extra=None):
-        os.makedirs("logs", exist_ok=True)
+        os.makedirs(f"logs/{directory}", exist_ok=True)
         self.save_population(f"logs/{directory}/population.pkl")
         self.save_individual(f"logs/{directory}/individual.pkl")
         self.config.save(f"logs/{directory}/config.json")

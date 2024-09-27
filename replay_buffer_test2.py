@@ -9,6 +9,8 @@ from atgen.layers.activations import ActiSwitch
 import gymnasium as gym
 import warnings
 
+from atgen.utils import log_level
+
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -17,27 +19,24 @@ game = "BipedalWalker-v3"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(crossover_rate=0.8, mutation_rate=0.8, perturbation_rate=0.9, mutation_decay=0.95, perturbation_decay=0.95,
-                             maximum_depth=3, default_activation=ActiSwitch(nn.Tanh(), True), speciation_level=0, deeper_mutation=0.01, wider_mutation=0.01)
-        memory = ReplayBuffer(buffer_size=20, steps=50, dilation=20, threshold=0.9, patient=50, accumulative_reward=False)
+        config = ATGENConfig(mutation_decay=0.95, perturbation_decay=0.95, maximum_depth=2, deeper_mutation=0.01)
+        memory = ReplayBuffer(buffer_size=4, steps=70, dilation=20, similarity_cohort=10)
         super().__init__(population_size, model, config, memory)
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
-        epochs = 1
         env = gym.make(game)
         total_reward = 0
-        for _ in range(epochs):
-            state, info = env.reset()
-            while True:
-                action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
-                state, reward, terminated, truncated, info = env.step(action)
-                total_reward += reward
-                
-                if terminated or truncated:
-                    break
+        state, info = env.reset()
+        while True:
+            action = model(torch.FloatTensor(state).unsqueeze(0)).squeeze(0).numpy()
+            state, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            
+            if terminated or truncated:
+                break
         env.close()
-        return total_reward / epochs
+        return total_reward
     
     @torch.no_grad()
     def experiences_fn(self, model: nn.Sequential):
@@ -55,23 +54,18 @@ class NeuroEvolution(ATGEN):
                 # total_reward += reward
                 self.memory.track(state, action, reward)
                 state = next_state
-                self.memory.half_clear()
                 
                 if terminated or truncated:
                     break
         env.close()
-        # print(f"Total reward: {total_reward}")
+        # print(f"Total reward: {total_reward-self.memory.lower_bound/log_level(steps, 1)}")
     
 
 if __name__ == "__main__":
     model = nn.Sequential(nn.Linear(24, 4), nn.Tanh())
-    ne = NeuroEvolution(200, model)
-    NeuroEvolution.load(ne)
-    ne.load("model.pkl")
-    ne.load_population()
-    ne.load_individual()
-    ne.config = ne.config.load()
-    ne.evolve(fitness=350, save_name="model.pkl", metrics=0, plot=True)
+    ne = NeuroEvolution(500, model)
+    # ne.load("BipedalWalker")
+    ne.evolve(fitness=300, save_name="BipedalWalker", metrics=0, plot=True)
     
     model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")

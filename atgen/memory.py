@@ -84,7 +84,8 @@ def continues_similarity(batch1: torch.Tensor, batch2: torch.Tensor) -> float:
 
 class ReplayBuffer:
     def __init__(self, buffer_size: int = 0, steps: int = 0, dilation: int = 0, discrete_action: bool = False, 
-                 threshold: float = 0, patient: int = 1, accumulative_reward=False, reward_range=(0, 0), prioritize: bool = True):
+                 similarity_threshold: float = 1.0, similarity_cohort: int = 1, accumulative_reward=False, 
+                 reward_range=(0, 0), prioritize: bool = True):
         
         self.steps: int = steps
         self.dilation: int = dilation
@@ -95,8 +96,8 @@ class ReplayBuffer:
         self.reward: Deque[int] = deque(maxlen=steps+dilation)
 
         self.discrete_action: bool = discrete_action
-        self.threshold: float = threshold
-        self.patient: int = patient
+        self.similarity_threshold: float = similarity_threshold
+        self.similarity_cohort: int = similarity_cohort
         self.offsprings: List[Tuple[float, nn.Sequential]] = []
 
         self.upper_bound = max(reward_range)
@@ -152,24 +153,26 @@ class ReplayBuffer:
     def track(self, state, action, reward):
         while len(self.state) < self.steps:
             self.step(state, action, reward)
-            self.upper_bound = reward ##
-            self.lower_bound = reward ##
+            self.upper_bound = reward
+            self.lower_bound = reward
             self.currant_action = Action.Normal
 
         self.step(state, action, reward)
         reward = self.reward[-1] if self.accumulative_reward else sum(self.reward)
         if reward > self.upper_bound:
-            self.upper_bound = reward ##
             if self.currant_action != Action.Good: 
+                self.upper_bound = reward
                 self.signal(Action.Good)
             self.currant_action = Action.Good
         elif reward < self.lower_bound:
-            self.lower_bound = reward ##
             if self.currant_action != Action.Bad:
+                self.lower_bound = reward
                 self.signal(Action.Bad)
             self.currant_action = Action.Bad
         else:
             self.currant_action = Action.Normal
+
+        self.half_clear()
 
 
     def _validate(self, model: nn.Sequential) -> float:
@@ -195,16 +198,17 @@ class ReplayBuffer:
 
     @torch.no_grad()
     def validate(self, model: nn.Sequential) -> nn.Sequential:
-        if self.patient is None:
-            return model if self._validate(model) >= self.threshold else None
-        else:
-            if len(self.offsprings) < self.patient:
-                self.offsprings.append((self._validate(model), model))
-            else:
-                self.offsprings.sort(key=lambda x: x[0], reverse=True)
-                model = self.offsprings[0][1]
+        if len(self.offsprings) < self.similarity_cohort:
+            distance = self._validate(model)
+            if distance >= self.similarity_threshold:
                 self.offsprings.clear()
                 return model
+            self.offsprings.append((distance, model))
+        else:
+            self.offsprings.sort(key=lambda x: x[0], reverse=True)
+            model = self.offsprings[0][1]
+            self.offsprings.clear()
+            return model
             
 
     def clear(self):
@@ -213,6 +217,8 @@ class ReplayBuffer:
         self.state.clear()
         self.action.clear()
         self.reward.clear()
+        self.upper_bound = 0
+        self.lower_bound = 0
         self.currant_action = Action.Normal
 
     

@@ -6,13 +6,14 @@ from torch import nn
 from .layers import ActiSwitch, LayerModifier
 from .utils import evolve, follow, copy, skip
 
+
 class ATGENConfig:
     def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, 
                  perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
-                 speciation_level=1, threshold=0.01, log_level=0, population_decay=0.95, min_population=50, default_activation=ActiSwitch(nn.ReLU(), True), 
+                 speciation_level=0, threshold=0.01, log_level=1, default_activation=ActiSwitch(nn.ReLU(), True), activation_mutation=0.5, difficulty=1, 
                  random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, elitism=True, buffer_update=False,
-                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, activation_mutation=0.5,
-                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True, difficulty=1):
+                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True,
+                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
 
         # Crossover setting 
         self.crossover_rate = crossover_rate
@@ -147,7 +148,7 @@ class ATGENConfig:
         serialized_data = base64.b64decode(encoded_data)
         modifiers = pickle.loads(serialized_data)
 
-        return cls(
+        loaded_config = cls(
             crossover_rate=config_data['crossover_rate'],
             crossover_decay=config_data['crossover_decay'],
             min_crossover=config_data['min_crossover'],
@@ -171,7 +172,6 @@ class ATGENConfig:
             random_topology=config_data['random_topology'],
             speciation_level=config_data['speciation_level'],
             difficulty=config_data['difficulty'],
-            current_difficulty=config_data['current_difficulty'],
             shared_fitness=config_data['shared_fitness'],
             log_level=config_data['log_level'],
             save_every_generation=config_data['save_every_generation'],
@@ -186,6 +186,8 @@ class ATGENConfig:
             extra_copy=modifiers['copy'],
             extra_skip=modifiers['skip']
         )
+        loaded_config.current_difficulty = config_data['current_difficulty']
+        return loaded_config
 
     @classmethod
     def _load_activation(cls, actiswitch, activation_name) -> nn.Module:

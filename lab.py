@@ -821,3 +821,81 @@
 # print(f"Similarity between continuous actions: {similarity_continues}")
 # print(continuous_actions1, "\n", continuous_actions2)
 
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+
+# Function to draw the distributions
+def draw_distributions():
+    # Parameters for the distributions
+    mu_g = 1.0  # Mean of good actions
+    sigma_g = 0.5  # Variance of good actions
+
+    mu_r = -1.0  # Mean of bad actions
+    sigma_r = 0.5  # Variance of bad actions
+
+    # Generate x values
+    x = np.linspace(0, 6, 1000)
+
+    # First Phase: Overlapping distributions with higher variances
+    plt.figure(figsize=(12, 8))
+
+    # Green distribution
+    y_g_1 = norm.pdf(x, mu_g, sigma_g)
+    plt.plot(x, y_g_1, color='green', label='Good Actions (High Variance)')
+    plt.fill_between(x, y_g_1, color='lightgreen', alpha=0.5)
+
+    # Red distribution
+    y_r_1 = norm.pdf(x, mu_r, sigma_r)
+    plt.plot(x, y_r_1, color='red', label='Bad Actions (High Variance)')
+    plt.fill_between(x, y_r_1, color='lightcoral', alpha=0.5)
+
+    plt.title('Phase 1: Initial Overlapping Distributions')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    # Second Phase: Distributions after training
+    sigma_g_2 = 0.3  # Reduced variance for good actions
+    sigma_r_2 = 0.3  # Reduced variance for bad actions
+
+    plt.figure(figsize=(12, 8))
+
+    # Green distribution
+    y_g_2 = norm.pdf(x, mu_g, sigma_g_2)
+    plt.plot(x, y_g_2, color='green', label='Good Actions (Reduced Variance)')
+    plt.fill_between(x, y_g_2, color='lightgreen', alpha=0.5)
+
+    # Red distribution
+    y_r_2 = norm.pdf(x, mu_r, sigma_r_2)
+    plt.plot(x, y_r_2, color='red', label='Bad Actions (Reduced Variance)')
+    plt.fill_between(x, y_r_2, color='lightcoral', alpha=0.5)
+
+    plt.title('Phase 2: Distributions After Training')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    # Third Phase: Further reduced variance and separation
+    sigma_g_3 = 0.2  # Further reduced variance for good actions
+    sigma_r_3 = 0.2  # Further reduced variance for bad actions
+
+    plt.figure(figsize=(12, 8))
+
+    # Green distribution
+    y_g_3 = norm.pdf(x, mu_g, sigma_g_3)
+    plt.plot(x, y_g_3, color='green', label='Good Actions (Further Reduced Variance)')
+    plt.fill_between(x, y_g_3, color='lightgreen', alpha=0.5)
+
+    # Red distribution
+    y_r_3 = norm.pdf(x, mu_r, sigma_r_3)
+    plt.plot(x, y_r_3, color='red', label='Bad Actions (Further Reduced Variance)')
+    plt.fill_between(x, y_r_3, color='lightcoral', alpha=0.5)
+
+    plt.title('Phase 3: Further Improved Distributions')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+# Call the function to draw the distributions
+draw_distributions()
