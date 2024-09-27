@@ -1,5 +1,6 @@
 import copy
 import math
+import os
 import torch
 from torch import nn
 
@@ -51,7 +52,10 @@ class ATGEN:
         """
 
         for individual in tqdm(self.population, desc=f"{BLUE}Fitness Evaluation{RESET_COLOR}", ncols=100):
-            individual.fitness = self.fitness_fn(individual.model)
+            total_fitness = 0
+            for _ in range(self.config.current_difficulty):
+                total_fitness += self.fitness_fn(individual.model)
+            individual.fitness = total_fitness / self.config.current_difficulty
 
         self.population.sort_fitness()
         if self.population.population[0].fitness > self.best_fitness:
@@ -119,8 +123,13 @@ class ATGEN:
         self.population.best_individual_summary()
 
         self.last_fitness = fitness[self.metrics] 
-        if fitness[self.metrics] > self.best_fitness: 
-            self.best_fitness = fitness[self.metrics]
+        if self.last_fitness > self.best_fitness: 
+            self.best_fitness = self.last_fitness
+        if self.config.buffer_update:
+            if color == GREEN:
+                self.memory.bad_buffer.clear()
+            elif color == RED:
+                self.memory.good_buffer.clear()
 
         if self.config.verbose:
             print_stats_table(self.best_fitness, self.metrics, fitness, len(self.population), len(self.population.groups), self.config)
@@ -139,7 +148,8 @@ class ATGEN:
         self.evaluate_fitness()
         results = self.preview_results()
         if self.config.save_every_generation and self.save_name is not None:
-            self.save_population(self.save_name)
+            self.save(self.save_name)
+            self.save_population()
             self.save_individual()
             self.config.save()
         
@@ -149,13 +159,12 @@ class ATGEN:
 
         # use best genome to create experiences
         if self.is_overridden("experiences_fn"):
-            print(f"{BLUE}Updating Experience Buffer...{RESET_COLOR}:", end=" ")
-            good_action_size = len([c.action_type for c in self.memory.buffer if c.action_type == Action.Good])
-            print(f"memory size: {len(self.memory)}, Good Action Size: {good_action_size}, Bad Action Size: {len(self.memory)-good_action_size}", end="\r")
-            self.experiences_fn(self.population.best_individual())
-            good_action_size = len([c.action_type for c in self.memory.buffer if c.action_type == Action.Good])
-            print(f"{BLUE}Updating Experience Buffer...{RESET_COLOR}:", end=" ")
-            print(f"memory size: {len(self.memory)}, Good Action Size: {good_action_size}, Bad Action Size: {len(self.memory)-good_action_size}          ")
+            print(f"{BLUE}Updating Experience Buffer{RESET_COLOR}...")
+            model = self.population.best_individual()
+            self.experiences_fn(model)
+            print(f"{BLUE}Memory Size{RESET_COLOR}: {len(self.memory)}\
+            \n -> {GREEN}Good{RESET_COLOR} (Size: {len(self.memory.good_buffer):<2}, Upper Bound: {round(self.memory.upper_bound, 3):<6}, Minimum Reward: {round(self.memory.good_buffer.min, 3):<6}) \
+            \n -> {RED}Bad {RESET_COLOR} (Size: {len(self.memory.bad_buffer):<2}, Lower Bound: {round(self.memory.lower_bound, 3):<6}, Maximum Reward: {round(self.memory.bad_buffer.max, 3):<6})")
         
         # implement pre_generation if required
         if self.is_overridden("pre_generation"):
@@ -169,27 +178,24 @@ class ATGEN:
         # offsprings generation
         offsprings: List[DNA] = []
         repeat = max(self.population_size-crossover_size, 0)
-        total_mutation = repeat + len(self.population) if self.config.parent_mutation else 0
+        total_mutation = repeat + (0 if self.config.elitism else len(self.population))
         with tqdm(total=total_mutation, desc=f"{BLUE}Crossover & Mutation{RESET_COLOR}", ncols=100) as pbar:
             if self.config.single_offspring:
                 for _ in range(repeat):
-                    passed = False
-                    while not passed:
+                    offspring = None
+                    while not offspring:
                         parent1, parent2 = self.select_parents()
                         offspring = self.crossover(parent1, parent2)[0]
                         self.mutate(offspring)
-                        passed = self.memory.validate(offspring.reconstruct())
-                    offsprings.append(offspring)
+                        offspring = self.memory.validate(offspring.reconstruct())
+                    offsprings.append(DNA(offspring, self.config))
                     pbar.update(1)
             else:
                 for i in range(math.ceil(repeat/2)):
-                    passed = False
-                    while not passed:
-                        parent1, parent2 = self.select_parents()
-                        offspring1, offspring2 = self.crossover(parent1, parent2)
-                        self.mutate(offspring1)
-                        self.mutate(offspring2)
-                        passed = self.memory.validate(offspring1.reconstruct()) and self.memory.validate(offspring2.reconstruct())
+                    parent1, parent2 = self.select_parents()
+                    offspring1, offspring2 = self.crossover(parent1, parent2)
+                    self.mutate(offspring1)
+                    self.mutate(offspring2)
                     offsprings.append(offspring1)
                     pbar.update(1)
                     if not ((i == math.ceil(repeat/2)-1) and ((repeat%2) == 1)):
@@ -197,15 +203,15 @@ class ATGEN:
                         pbar.update(1)
 
             # mutate parents
-            if self.config.parent_mutation:
+            if not self.config.elitism:
                 parents: List[DNA] = []
                 for individual in self.population:
-                    passed = False
-                    while not passed:
+                    dna = None
+                    while not dna:
                         dna = copy.deepcopy(individual.dna)
                         self.mutate(dna)
-                        passed = self.memory.validate(dna.reconstruct())
-                    parents.append(dna)
+                        dna = self.memory.validate(dna.reconstruct())
+                    parents.append(DNA(dna, self.config))
                     pbar.update(1)
                 self.population.clear()
                 self.population.extend(parents)
@@ -228,13 +234,21 @@ class ATGEN:
         return results
     
     def check_criteria(self, results): # saving criteria for reached results
-        return results[self.metrics] > self.required_fitness if self.required_fitness else False
+        if self.required_fitness:
+            if results[self.metrics] >= self.required_fitness:
+                if self.config.current_difficulty < self.config.difficulty:
+                    self.config.current_difficulty += 1
+                elif self.config.current_difficulty == self.config.difficulty:
+                    print(f"--- {BLUE}Fitness reached{RESET_COLOR} ---\n")
+                    return True
+        return False
+        # return results[self.metrics] > self.required_fitness if self.required_fitness else False
 
     def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
         self.metrics = metrics
         self.save_name = save_name
         self.required_fitness = fitness
-        last_fitness = -float("inf")
+
         maximum, mean, minimum = [], [], []
         if generation is not None:
                 for i in range(generation):
@@ -243,53 +257,34 @@ class ATGEN:
                     maximum.append(results[0])
                     mean.append(results[1])
                     minimum.append(results[2])
-                    last_fitness = results[metrics]
-                    if fitness is not None:
-                        if last_fitness >= fitness:
-                            print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
-                            break
-        
+                    if self.check_criteria(results):
+                        break
+        # reach fitness if no generation number required
         elif fitness is not None:
             generation =  0
-            while fitness > last_fitness:
+            while True:
                 generation += 1
                 print(f"\n--- {BLUE}Generation {generation}{RESET_COLOR} ---")
                 results = self.run_generation()
                 maximum.append(results[0])
                 mean.append(results[1])
                 minimum.append(results[2])
-                last_fitness = results[metrics]
-            print(f"\n--- {BLUE}Fitness reached{RESET_COLOR} ---")
-            
+                if self.check_criteria(results):
+                    break
+        # break if no given generation number or fitness value
         else:
             raise ValueError("evolve using generation number or fitness value")
-        
-        if save_name is not None:
-            self.save_population(save_name)
-            self.save_individual()
         
         if plot:
             plt.plot(range(len(mean)), mean, label='Mean Fitness')
             plt.fill_between(range(len(mean)), minimum, maximum, alpha=0.2, label='Confidence Interval')
-
-            # Set labels and title
             plt.xlabel('Generation Number')
             plt.ylabel('Fitness')
             plt.title('Training Progress with Confidence Interval')
             plt.legend(loc='upper right')
             plt.grid(True)
             plt.show()
-        else:
-            return maximum, mean, minimum
-    
-    def fitness_fn(self, genome):
-        raise NotImplementedError("implement fitness_fn method")
-    
-    def backprob_fn(self, genome):
-        raise NotImplementedError("implement learn_fn method")
-    
-    def experiences_fn(self, genome):
-        raise NotImplementedError("implement store_experiences method")
+        return maximum, mean, minimum
     
     def is_overridden(self, method_name):
         if getattr(self, method_name, None) is None:
@@ -299,6 +294,15 @@ class ATGEN:
             if method_name in cls.__dict__:
                 return cls != ATGEN
         return False
+    
+    def fitness_fn(self, genome):
+        raise NotImplementedError("implement fitness_fn method")
+    
+    def backprob_fn(self, genome):
+        raise NotImplementedError("implement learn_fn method")
+    
+    def experiences_fn(self, genome):
+        raise NotImplementedError("implement store_experiences method")
     
     def pre_generation(self):
         raise NotImplementedError("implement pre_generation method")
@@ -321,39 +325,31 @@ class ATGEN:
     def load_individual(self, file_name="individual.pkl"):
         with open(f'{file_name}', 'rb') as file:
             self.best_individual = pickle.load(file)
-    
-    def continual_evolution(self, fitness):
-        self.evaluate_fitness()
-        fitness_scores = [individual.fitness for individual in self.population]
-        minimum_fitness = min(fitness_scores)
-        generation = 1
-        while True:
-            for i in range(self.population_size):
-                parent1, parent2 = self.select_parents()
-                offspring = self.crossover(parent1, parent2)[0]
-                self.mutate(offspring)
-                offspring = Individual(offspring)
-                offspring.fitness = self.fitness_fn(offspring.model)
-                if offspring.fitness > minimum_fitness:
-                    self.population.exchange(offspring, minimum_fitness)
-                    fitness_scores = [individual.fitness for individual in self.population]
-                    minimum_fitness = min(fitness_scores)
-                    self.population.calculate_shared()
-                    if self.config.shared_fitness:
-                        self.population.sort_shared()
-                if offspring.fitness > self.best_fitness:
-                    self.best_fitness = offspring.fitness
-                    print(f"Generation: {generation}, Better Fitness Reached: {offspring.fitness}")
-                else:
-                    print(f"Generation: {generation}, Offspring Fitness: {offspring.fitness}", end="\r")
-                if self.best_fitness >= fitness:
-                    return
-            generation += 1
-            if self.is_overridden("pre_generation"):
-                self.pre_generation()
-            self.config.step()
-            print("Mutation Rate:",self.config.mutation_rate)
-            self.save_population()
+
+    def save(self, directory="model", extra=None):
+        os.makedirs("logs", exist_ok=True)
+        self.save_population(f"logs/{directory}/population.pkl")
+        self.save_individual(f"logs/{directory}/individual.pkl")
+        self.config.save(f"logs/{directory}/config.json")
+        self.memory.save(f"logs/{directory}/memory.pkl")
+        if extra:
+            with open(f"logs/{directory}/extra.pkl", "wb") as file:
+                pickle.dump(extra, file)
+
+
+    def load(self, directory="model"):
+        extra = None
+        if os.path.exists(f"logs/{directory}"):
+            self.load_population(f"logs/{directory}/population.pkl")
+            self.load_individual(f"logs/{directory}/individual.pkl")
+            self.config = self.config.load(f"logs/{directory}/config.json")
+            self.memory = self.memory.load(f"logs/{directory}/memory.pkl")
+            if os.path.exists(f"logs/{directory}/extra.pkl"):
+                with open(f"logs/{directory}/extra.pkl", "rb") as file:
+                    extra = pickle.load(file)
+        else:
+            warnings.warn(f"Log path 'logs/{directory}' not found. Starting a new training session.", UserWarning)
+        return extra
 
 
     

@@ -272,11 +272,18 @@ class DNA:
 
     @torch.no_grad()
     def evolve_weight(self, mutation_rate, perturbation_rate):
-        for param in [param for module in self.dna for layer in module for param in layer.parameters()]:
+        for param in (param for module in self.dna for layer in module for param in layer.parameters()):
             if param.requires_grad:
                 mask = torch.rand_like(param) < mutation_rate
                 noise = torch.randn_like(param) * perturbation_rate
                 param.add_(mask * noise)
+        # mutate activation
+        if random.random() < self.config.activation_mutation:
+            for layer in (layer for module in self.dna for layer in module):
+                if isinstance(layer, ActiSwitch):
+                    if layer.activation_weight.requires_grad:
+                        layer.activation_weight.add_(torch.randn_like(layer.activation_weight) * self.config.perturbation_rate)
+                        layer.linear_weight.add_(torch.randn_like(layer.linear_weight) * self.config.perturbation_rate)
 
     @torch.no_grad()
     def __add__(self, RNA: "DNA"):
@@ -294,14 +301,14 @@ class DNA:
                     rna.evolve_wider(i, a)
             dna, rna = dna.reconstruct(), rna.reconstruct()
 
-            if self.config.direct_crossover and self.config.single_offspring:
-                for param1, param2 in zip(dna.parameters(), rna.parameters()):
-                    param1.data = torch.where(param1.data > param2.data, param1.data, param2.data)
-                    param1.data = torch.where(param1.data > param2.data, param1.data, torch.rand_like(param1.data))
-            else:
-                for param1, param2 in zip(dna.parameters(), rna.parameters()):
-                    mask = torch.rand_like(param1.data) > 0.5
-                    param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+            # if self.config.direct_crossover and self.config.single_offspring:
+            #     for param1, param2 in zip(dna.parameters(), rna.parameters()):
+            #         param1.data = torch.where(param1.data > param2.data, param1.data, param2.data)
+            #         param1.data = torch.where(param1.data > param2.data, param1.data, torch.rand_like(param1.data))
+            # else:
+            for param1, param2 in zip(dna.parameters(), rna.parameters()):
+                mask = torch.rand_like(param1.data) > 0.5
+                param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
             return DNA(dna, self.config), DNA(rna, self.config)
         else:
             raise Exception("DNA structure is not in the same Species")

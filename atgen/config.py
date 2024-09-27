@@ -9,21 +9,18 @@ from .utils import evolve, follow, copy, skip
 class ATGENConfig:
     def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, 
                  perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
-                 speciation_level=1, threshold=0.01, log_level=0, population_decay=0.95, min_population=50, default_activation=ActiSwitch(nn.ReLU()), 
-                 random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, parent_mutation=True, 
-                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, direct_crossover=False,
-                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True, direct_crossover_rate=0.01):
+                 speciation_level=1, threshold=0.01, log_level=0, population_decay=0.95, min_population=50, default_activation=ActiSwitch(nn.ReLU(), True), 
+                 random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, elitism=True, buffer_update=False,
+                 remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True, activation_mutation=0.5,
+                 extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True, difficulty=1):
 
-        # Crossover setting
+        # Crossover setting 
         self.crossover_rate = crossover_rate
         self.crossover_decay = crossover_decay
         self.min_crossover = min_crossover
         self.dynamic_dropout_population = dynamic_dropout_population
         self.single_offspring = single_offspring
         self.select_top_only = select_top_only
-        self.direct_crossover = direct_crossover
-
-        self.direct_crossover_rate = direct_crossover_rate
 
         # Mutation setting
         self.mutation_rate = mutation_rate
@@ -36,14 +33,18 @@ class ATGENConfig:
         self.wider_mutation = wider_mutation
         self.deeper_mutation = deeper_mutation
         self.remove_mutation = remove_mutation
-        self.parent_mutation = parent_mutation
+        self.activation_mutation = activation_mutation
         self.maximum_depth = maximum_depth
+        self.elitism = elitism
 
         self.random_topology = random_topology  
         self.speciation_level = speciation_level  # 0->layer level, else-> neuron level
+        self.difficulty = difficulty
+        self.current_difficulty = 1
         self.shared_fitness = shared_fitness
         self.log_level = log_level
         self.save_every_generation = save_every_generation
+        self.buffer_update = buffer_update
 
         # Network setting
         self.threshold = threshold
@@ -98,7 +99,6 @@ class ATGENConfig:
             'dynamic_dropout_population': self.dynamic_dropout_population,
             'single_offspring': self.single_offspring,
             'select_top_only': self.select_top_only,
-            'direct_crossover': self.direct_crossover,
 
             'mutation_rate': self.mutation_rate,
             'mutation_decay': self.mutation_decay,
@@ -109,14 +109,18 @@ class ATGENConfig:
             'wider_mutation': self.wider_mutation,
             'deeper_mutation': self.deeper_mutation,
             'remove_mutation': self.remove_mutation,
-            'parent_mutation': self.parent_mutation,
+            'activation_mutation': self.activation_mutation,
             'maximum_depth': self.maximum_depth,
+            'elitism': self.elitism,
 
             'random_topology': self.random_topology,
             'speciation_level': self.speciation_level,
+            'difficulty': self.difficulty,
+            'current_difficulty': self.current_difficulty,
             'shared_fitness': self.shared_fitness,
             'log_level': self.log_level,
             'save_every_generation': self.save_every_generation,
+            'buffer_update': self.buffer_update,
 
             'threshold': self.threshold,
             'actiswitch': actiswitch,
@@ -150,7 +154,6 @@ class ATGENConfig:
             dynamic_dropout_population=config_data['dynamic_dropout_population'],
             single_offspring=config_data['single_offspring'],
             select_top_only=config_data['select_top_only'],
-            direct_crossover=config_data['direct_crossover'],
 
             mutation_rate=config_data['mutation_rate'],
             mutation_decay=config_data['mutation_decay'],
@@ -161,14 +164,18 @@ class ATGENConfig:
             wider_mutation=config_data['wider_mutation'],
             deeper_mutation=config_data['deeper_mutation'],
             remove_mutation=config_data['remove_mutation'],
-            parent_mutation=config_data['parent_mutation'],
+            activation_mutation=config_data['activation_mutation'],
             maximum_depth=config_data['maximum_depth'],
+            elitism=config_data['elitism'],
 
             random_topology=config_data['random_topology'],
             speciation_level=config_data['speciation_level'],
+            difficulty=config_data['difficulty'],
+            current_difficulty=config_data['current_difficulty'],
             shared_fitness=config_data['shared_fitness'],
             log_level=config_data['log_level'],
             save_every_generation=config_data['save_every_generation'],
+            buffer_update=config_data['buffer_update'],
 
             threshold=config_data['threshold'],
             default_activation=default_activation,
