@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 class ATGEN:
-    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), memory=ReplayBuffer()):
+    def __init__(self, population_size: int, network: nn.Sequential, config=ATGENConfig(), memory=ReplayBuffer(), patience=None):
         self.population_size = population_size
         self.config = config
         self.memory = memory
@@ -43,8 +43,14 @@ class ATGEN:
         self.best_fitness = float("-inf")
         self.last_fitness = float("-inf")
         self.worst_shared = float("-inf")
+        self.last_improvement = 0 # to track patient flags in Memory and Config classes
+
+        self.extra = None # save utils (custom objects) used in your design
+
+        # stopping criteria
         self.required_fitness: float = None
         self.fitness_reached = False # avoid double criteria check (avoid double difficulty)
+        self.patience = patience
 
     @torch.no_grad()
     def evaluate_fitness(self):
@@ -126,11 +132,14 @@ class ATGEN:
         self.last_fitness = fitness[self.metrics] 
         if self.last_fitness > self.best_fitness: 
             self.best_fitness = self.last_fitness
-        if self.config.buffer_update:
-            if color == GREEN:
-                self.memory.bad_buffer.clear()
-            elif color == RED:
-                self.memory.good_buffer.clear()
+            self.last_improvement = 0
+        else:
+            self.last_improvement += 1
+            if self.config.patience == self.last_improvement:
+                if self.config.current_depth < self.config.maximum_depth:
+                    self.config.current_depth += 1
+            if self.memory.patience == self.last_improvement:
+                self.memory.clear()
 
         if self.config.verbose:
             print_stats_table(self.best_fitness, self.metrics, fitness, len(self.population), len(self.population.groups), self.config)
@@ -148,8 +157,8 @@ class ATGEN:
         # Evaluate the fitness and preview results, also save it if required
         self.evaluate_fitness()
         results = self.preview_results()
-        if self.config.save_every_generation and self.save_name is not None:
-            self.save(self.save_name)
+        if self.config.save_every_generation and self.log_name is not None:
+            self.save(self.log_name, self.extra)
         
         # return if criteria reached
         if self.check_criteria(results):
@@ -231,6 +240,7 @@ class ATGEN:
 
         return results
     
+    
     def check_criteria(self, results): # saving criteria for reached results
         if self.required_fitness:
             if results[self.metrics] >= self.required_fitness:
@@ -244,12 +254,17 @@ class ATGEN:
                     self.fitness_reached = True
                     print(f"--- {BLUE}Fitness reached{RESET_COLOR} ---\n")
                     return True
+        if self.patience:
+            if self.patience == self.last_improvement:
+                self.fitness_reached = True
+                print(f"--- {BLUE}Fitness reached{RESET_COLOR} ---\n")
+                return True
         return False
-        # return results[self.metrics] > self.required_fitness if self.required_fitness else False
+    
 
-    def evolve(self, generation: int=None, fitness: int=None, save_name: str=None, metrics: int=0, plot: bool=False):
+    def evolve(self, generation: int=None, fitness: int=None, log_name: str=None, metrics: int=0, plot: bool=False):
         self.metrics = metrics
-        self.save_name = save_name
+        self.log_name = log_name
         self.required_fitness = fitness
 
         maximum, mean, minimum = [], [], []
@@ -288,6 +303,7 @@ class ATGEN:
             plt.grid(True)
             plt.show()
         return maximum, mean, minimum
+    
     
     def is_overridden(self, method_name):
         if getattr(self, method_name, None) is None:
@@ -338,7 +354,6 @@ class ATGEN:
         if extra:
             with open(f"logs/{directory}/extra.pkl", "wb") as file:
                 pickle.dump(extra, file)
-
 
     def load(self, directory="model"):
         extra = None

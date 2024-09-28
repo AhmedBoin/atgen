@@ -1,6 +1,7 @@
 
 import math
 from typing import Dict, List, Tuple
+import torch
 import torch.nn as nn
 from torch.nn import init
 import numpy as np
@@ -169,3 +170,164 @@ def stable_softmax(x: List[float]) -> np.ndarray:
     # exps = np.exp(x - np.max(x))
     # return exps / np.sum(exps)
 
+
+"""
+CrossOver Types
+"""
+def single_point_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    crossover_point = len(list(dna.parameters())) // 2
+    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
+        if i > crossover_point:
+            param1.data = param2.data.clone()
+
+def two_point_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    num_params = len(list(dna.parameters()))
+    point1 = num_params // 3
+    point2 = 2 * num_params // 3
+    
+    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
+        if point1 < i < point2:
+            param1.data = param2.data.clone()
+
+def uniform_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    for param1, param2 in zip(dna.parameters(), rna.parameters()):
+        mask = torch.rand_like(param1.data) > 0.5
+        param1.data = torch.where(mask, param1.data, param2.data)
+
+def arithmetic_crossover(dna: nn.Sequential, rna: nn.Sequential, alpha=0.5):
+    for param1, param2 in zip(dna.parameters(), rna.parameters()):
+        param1.data = alpha * param1.data + (1 - alpha) * param2.data
+
+def blend_crossover(dna: nn.Sequential, rna: nn.Sequential, alpha=0.5):
+    for param1, param2 in zip(dna.parameters(), rna.parameters()):
+        min_val = torch.min(param1.data, param2.data)
+        max_val = torch.max(param1.data, param2.data)
+        diff = max_val - min_val
+        param1.data = (min_val - alpha * diff) + torch.rand_like(param1.data) * (1 + 2 * alpha) * diff
+
+def n_point_crossover(dna: nn.Sequential, rna: nn.Sequential, n=3):
+    num_params = len(list(dna.parameters()))
+    crossover_points = sorted([torch.randint(0, num_params, (1,)).item() for _ in range(n)])
+    
+    swap = False
+    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
+        if i in crossover_points:
+            swap = not swap
+        if swap:
+            param1.data = param2.data.clone()
+
+def hux_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    for param1, param2 in zip(dna.parameters(), rna.parameters()):
+        mask = torch.rand_like(param1.data) > 0.5
+        param1.data = torch.where(mask, param1.data, param2.data)
+        param2.data = torch.where(mask, param2.data, param1.data)
+
+def order_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    num_params = len(list(dna.parameters()))
+    point1, point2 = sorted(torch.randint(0, num_params, (2,)).tolist())
+
+    child_params = [None] * num_params
+    child_params[point1:point2] = list(dna.parameters())[point1:point2]
+    
+    remaining_genes = [param for param in rna.parameters() if param not in child_params]
+    for i in range(num_params):
+        if child_params[i] is None:
+            child_params[i] = remaining_genes.pop(0)
+    
+    for i, param in enumerate(dna.parameters()):
+        param.data = child_params[i].data.clone()
+
+import torch
+import random
+
+def pmx_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    """
+    Perform Partially Mapped Crossover (PMX) on two neural networks (dna and rna).
+    This operation swaps a segment of weights between the two networks and ensures
+    a consistent mapping between the swapped segments.
+
+    Parameters:
+    - dna: The first parent network (PyTorch model)
+    - rna: The second parent network (PyTorch model)
+
+    The function modifies the `dna` network in place to represent the child.
+    """
+
+    # Get the list of parameters (weights) from both networks
+    dna_params = list(dna.parameters())
+    rna_params = list(rna.parameters())
+
+    num_params = len(dna_params)
+
+    # Select two random crossover points
+    point1, point2 = sorted(random.sample(range(num_params), 2))
+
+    # Initialize a mapping dictionary for the PMX operation
+    mapping = {}
+
+    # Perform PMX within the selected segment
+    for i in range(point1, point2 + 1):
+        dna_value = dna_params[i].clone()
+        rna_value = rna_params[i].clone()
+
+        # Swap the parameter values between dna and rna within the segment
+        dna_params[i].data, rna_params[i].data = rna_value.data, dna_value.data
+
+        # Update the mapping for the PMX operation
+        mapping[dna_value.item()] = rna_value.item()
+
+    # Fix the mapping outside of the crossover segment
+    for i in range(num_params):
+        if i < point1 or i > point2:
+            original_value = dna_params[i].item()
+            while original_value in mapping:
+                original_value = mapping[original_value]
+
+            dna_params[i].data.fill_(original_value)
+
+def hyper_crossover(dna: nn.Sequential, rna: nn.Sequential):
+    for param1, param2 in zip(dna.parameters(), rna.parameters()):
+        mask = torch.rand_like(param1.data) > 0.5
+        param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+
+
+crossover_dict = {
+    'single_point': single_point_crossover,
+    'two_point': two_point_crossover,
+    'uniform': uniform_crossover, # prefer to use
+    'arithmetic': arithmetic_crossover,
+    'blend': blend_crossover, # prefer to use
+    'npoint': n_point_crossover,
+    'hux': hux_crossover,
+    'order': order_crossover, # prefer not to use
+    'pmx': pmx_crossover, # prefer not to use
+    'hyper': hyper_crossover,
+}
+
+
+"""
+Mutation
+"""
+def gaussian_mutation(param: torch.nn.Parameter, mutation_rate: float, perturbation_rate: float):
+    mask = torch.rand_like(param) < mutation_rate
+    noise = torch.randn_like(param) * perturbation_rate
+    param.data.add_(mask * noise)
+
+def uniform_mutation(param: torch.nn.Parameter, mutation_rate: float):
+    mask = torch.rand_like(param) < mutation_rate
+    param.data[mask] = torch.rand_like(param[mask])  # Replace with new random values
+
+def swap_mutation(param: torch.nn.Parameter, mutation_rate: float):
+    if torch.rand(1).item() < mutation_rate:
+        idx1, idx2 = torch.randint(0, param.size(0), (2,))
+        param[idx1], param[idx2] = param[idx2].clone(), param[idx1].clone()  # Swap rows
+
+def scramble_mutation(param: torch.nn.Parameter, mutation_rate: float):
+    if torch.rand(1).item() < mutation_rate:
+        indices = torch.randperm(param.size(0))
+        param.data.copy_(param[indices])  # Shuffle rows
+
+def inversion_mutation(param: torch.nn.Parameter, mutation_rate: float):
+    if torch.rand(1).item() < mutation_rate:
+        start, end = sorted(torch.randint(0, param.size(0), (2,)).tolist())
+        param[start:end] = param[start:end][::-1]  # Reverse the segment

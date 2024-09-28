@@ -6,7 +6,7 @@ from typing import List, Tuple, Union
 import torch
 from torch import nn
 
-from .utils import BLUE, BOLD, RESET_COLOR
+from .utils import BLUE, BOLD, RESET_COLOR, arithmetic_crossover, blend_crossover, gaussian_mutation, hux_crossover, hyper_crossover, inversion_mutation, n_point_crossover, order_crossover, pmx_crossover, scramble_mutation, single_point_crossover, swap_mutation, two_point_crossover, uniform_crossover, uniform_mutation
 from .layers import ActiSwitch, EvolveAction
 from .config import ATGENConfig
 
@@ -60,12 +60,12 @@ class EvolveBlock:
         return len(self.modules)
     
     def structure(self):
-        if self.config.speciation_level == 0:
+        if self.config.speciation_level == "layer":
             kind = self.modules[0].__class__.__name__
             if kind.startswith("Lazy"):
                 kind = kind[4:]
             return kind
-        else:
+        elif self.config.speciation_level == "neuron":
             return str(self.genes())
     
     def new(self) -> List[nn.Module]:
@@ -221,10 +221,10 @@ class DNA:
             new.extend(block.new())
         model = DNA(copy.deepcopy(nn.Sequential(*new).to(self.device)), self.config)
         if self.config.random_topology: # if different topology required 
-            depth = random.randint(0, self.config.maximum_depth-1)
+            depth = random.randint(0, self.config.current_depth-1)
             for _ in range(depth):
                 model.evolve_deeper()
-            width = random.randint(0, self.config.maximum_depth-1)
+            width = random.randint(0, self.config.current_depth-1)
             for _ in range(width*width):
                 model.evolve_wider()
             weights = 1 * (depth if depth > 0 else 1) * ((width*width) if width > 0 else 1)
@@ -240,7 +240,7 @@ class DNA:
     
     @torch.no_grad()
     def evolve_deeper(self, idx: int=None):
-        if self.dna and (self.config.maximum_depth > len(self.dna)):
+        if self.dna and (self.config.current_depth > len(self.dna)):
             idx = random.randint(0, len(self.dna)-1) if idx is None else idx
             if self.dna[idx].mutate():
                 self.dna.insert(idx, self.dna[idx].identity())
@@ -272,11 +272,19 @@ class DNA:
 
     @torch.no_grad()
     def evolve_weight(self, mutation_rate, perturbation_rate):
-        for param in (param for module in self.dna for layer in module for param in layer.parameters()):
+        for param in (param for module in self.dna for layer in module for param in layer.parameters() if not isinstance(layer, ActiSwitch)):
             if param.requires_grad:
-                mask = torch.rand_like(param) < mutation_rate
-                noise = torch.randn_like(param) * perturbation_rate
-                param.add_(mask * noise)
+                if self.config.mutation_method == 'gaussian':
+                    gaussian_mutation(param, mutation_rate, perturbation_rate)
+                elif self.config.mutation_method == 'uniform':
+                    uniform_mutation(param, mutation_rate)
+                elif self.config.mutation_method == 'swap':
+                    swap_mutation(param, mutation_rate)
+                elif self.config.mutation_method == 'scramble':
+                    scramble_mutation(param, mutation_rate)
+                elif self.config.mutation_method == 'inversion':
+                    inversion_mutation(param, mutation_rate)
+
         # mutate activation
         if random.random() < self.config.activation_mutation:
             for layer in (layer for module in self.dna for layer in module):
@@ -300,15 +308,28 @@ class DNA:
                 for _ in range(t):
                     rna.evolve_wider(i, a)
             dna, rna = dna.reconstruct(), rna.reconstruct()
-
-            # if self.config.direct_crossover and self.config.single_offspring:
-            #     for param1, param2 in zip(dna.parameters(), rna.parameters()):
-            #         param1.data = torch.where(param1.data > param2.data, param1.data, param2.data)
-            #         param1.data = torch.where(param1.data > param2.data, param1.data, torch.rand_like(param1.data))
-            # else:
-            for param1, param2 in zip(dna.parameters(), rna.parameters()):
-                mask = torch.rand_like(param1.data) > 0.5
-                param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+            
+            if self.config.crossover_method == "single_point":
+                single_point_crossover(dna, rna)
+            elif self.config.crossover_method == "two_point":
+                two_point_crossover(dna, rna)
+            elif self.config.crossover_method == "uniform":
+                uniform_crossover(dna, rna)
+            elif self.config.crossover_method == "arithmetic":
+                arithmetic_crossover(dna, rna, self.config.crossover_param)
+            elif self.config.crossover_method == "blend":
+                blend_crossover(dna, rna, self.config.crossover_param)
+            elif self.config.crossover_method == "npoint":
+                n_point_crossover(dna, rna, self.config.crossover_param)
+            elif self.config.crossover_method == "hux":
+                hux_crossover(dna, rna)
+            elif self.config.crossover_method == "order":
+                order_crossover(dna, rna)
+            elif self.config.crossover_method == "pmx":
+                pmx_crossover(dna, rna)
+            elif self.config.crossover_method == "hyper":
+                hyper_crossover(dna, rna)
+            
             return DNA(dna, self.config), DNA(rna, self.config)
         else:
             raise Exception("DNA structure is not in the same Species")

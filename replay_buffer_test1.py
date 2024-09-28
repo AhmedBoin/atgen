@@ -17,7 +17,7 @@ game = "LunarLander-v2"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(maximum_depth=1, difficulty=5)
+        config = ATGENConfig(maximum_depth=1, difficulty=5, mutation_method="uniform", crossover_method="blend")
         memory = ReplayBuffer(buffer_size=4, steps=50, dilation=20, discrete_action=True, accumulative_reward=True, similarity_cohort=10)
         
         super().__init__(population_size, model, config, memory)

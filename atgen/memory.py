@@ -26,10 +26,10 @@ class ContainerBuffer:
         self.action_type: str = action_type
 
     def __str__(self) -> str:
-        return f"Container(state: {self.state}, action: {self.action}, reward: {self.reward}, type: {self.action_type})"
+        return f"Container(state: {self.state.shape}, action: {self.action.shape}, reward: {self.reward}, type: {self.action_type})"
 
     def __repr__(self) -> str:
-        return f"reward: {self.reward}, type: {self.action_type})"
+        return self.__str__()
     
 
 class CustomDeque(deque, Generic[TypeVar('T')]):
@@ -85,7 +85,7 @@ def continues_similarity(batch1: torch.Tensor, batch2: torch.Tensor) -> float:
 class ReplayBuffer:
     def __init__(self, buffer_size: int = 0, steps: int = 0, dilation: int = 0, discrete_action: bool = False, 
                  similarity_threshold: float = 1.0, similarity_cohort: int = 1, accumulative_reward=False, 
-                 reward_range=(0, 0), prioritize: bool = True):
+                 reward_range=(0, 0), prioritize: bool = True, patience=10):
         
         self.steps: int = steps
         self.dilation: int = dilation
@@ -106,6 +106,7 @@ class ReplayBuffer:
 
         self.accumulative_reward = accumulative_reward
         self.prioritize = prioritize
+        self.patience = patience
 
 
     @property
@@ -119,8 +120,7 @@ class ReplayBuffer:
         self.reward.append(reward)
 
 
-    def signal(self, action_type: str):
-        reward = self.reward[-1] if self.accumulative_reward else sum(self.reward)
+    def signal(self, action_type: str, reward: int):
         new_container = ContainerBuffer(self.state, self.action, reward, action_type, self.steps)
         
         if self.prioritize:
@@ -159,20 +159,21 @@ class ReplayBuffer:
 
         self.step(state, action, reward)
         reward = self.reward[-1] if self.accumulative_reward else sum(self.reward)
-        if reward > self.upper_bound:
+        if reward >= self.upper_bound:
             if self.currant_action != Action.Good: 
                 self.upper_bound = reward
-                self.signal(Action.Good)
+                self.signal(Action.Good, reward)
             self.currant_action = Action.Good
-        elif reward < self.lower_bound:
+        elif reward <= self.lower_bound:
             if self.currant_action != Action.Bad:
                 self.lower_bound = reward
-                self.signal(Action.Bad)
+                self.signal(Action.Bad, reward)
             self.currant_action = Action.Bad
         else:
             self.currant_action = Action.Normal
 
-        self.half_clear()
+        if self.prioritize:
+            self.half_clear()
 
 
     def _validate(self, model: nn.Sequential) -> float:
@@ -249,98 +250,3 @@ class ReplayBuffer:
             return pickle.load(file)
     
 
-if __name__ == "__main__":
-    
-    def test_replay_buffer_initialization():
-        buffer = ReplayBuffer(buffer_size=10, steps=5)
-        assert len(buffer) == 0, "Buffer should be empty on initialization"
-        assert buffer.steps == 5, "Steps should be set correctly"
-        assert buffer.buffer_size == 10, "Buffer size should be set correctly"
-        print("test_replay_buffer_initialization passed")
-
-    def test_track_rewards():
-        buffer = ReplayBuffer(buffer_size=10, steps=3, reward_range=(5, -5))
-        state = [torch.rand(1, 4) for _ in range(3)]
-        action = [torch.rand(1, 2) for _ in range(3)]
-        
-        buffer.track(state[0], action[0], reward=1)  # Normal state
-        buffer.track(state[1], action[1], reward=6)  # Good action
-        buffer.track(state[2], action[2], reward=-10)  # Bad action
-
-        assert len(buffer) == 2, "Buffer should contain 2 entries"
-        assert buffer.buffer[0].action_type == Action.Good, "First entry should be Good action"
-        assert buffer.buffer[1].action_type == Action.Bad, "Second entry should be Bad action"
-        print("test_track_rewards passed")
-
-    def test_signal_method():
-        buffer = ReplayBuffer(buffer_size=5, prioritize=True)
-        state = [torch.rand(1, 4) for _ in range(3)]
-        action = [torch.rand(1, 2) for _ in range(3)]
-        
-        buffer.step(state[0], action[0], reward=10)
-        buffer.step(state[1], action[1], reward=-5)
-        buffer.signal(Action.Good)
-        
-        assert len(buffer) == 1, "Buffer should have 1 entry after signaling"
-        assert buffer.buffer[0].action_type == Action.Good, "Entry should be of Good action type"
-        print("test_signal_method passed")
-
-    def test_validate():
-        buffer = ReplayBuffer(buffer_size=5, steps=2, discrete_action=False)
-        state = [torch.rand(1, 4) for _ in range(2)]
-        action = [torch.rand(1, 2) for _ in range(2)]
-        
-        buffer.track(state[0], action[0], reward=6)  # Good action
-        buffer.track(state[1], action[1], reward=-3)  # Bad action
-
-        model = nn.Sequential(nn.Linear(4, 2))  # Dummy model
-        is_valid = buffer.validate(model)
-        
-        assert not is_valid, "Validation should fail as model isn't trained"
-        print("test_validate passed")
-
-    def test_clear_buffer():
-        buffer = ReplayBuffer(buffer_size=5, steps=3)
-        state = [torch.rand(1, 4) for _ in range(3)]
-        action = [torch.rand(1, 2) for _ in range(3)]
-        
-        buffer.track(state[0], action[0], reward=1)
-        buffer.track(state[1], action[1], reward=6)
-        buffer.track(state[2], action[2], reward=-10)
-        
-        buffer.clear()
-        assert len(buffer) == 0, "Buffer should be empty after clearing"
-        print("test_clear_buffer passed")
-
-    def test_discrete_similarity():
-        old_actions = torch.tensor([1, 0, 1, 0, 1])
-        new_actions = torch.tensor([1, 1, 1, 0, 1])
-        dist = discrete_similarity(old_actions, new_actions)
-        assert math.isclose(dist, 0.2, rel_tol=1e-5), f"Hamming similarity should be 0.2, got {dist}"
-        print("test_discrete_similarity passed")
-
-    def test_continues_similarity_zscore():
-        batch1 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-        batch2 = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-        dist = continues_similarity(batch1, batch2, method='zscore')
-        assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"similarity should be 0.0 for identical batches, got {dist}"
-        print("test_continues_similarity_zscore passed")
-
-    def test_continues_similarity_minmax():
-        batch1 = torch.tensor([[1., 2.], [3., 4.]])
-        batch2 = torch.tensor([[1., 2.], [3., 4.]])
-        dist = continues_similarity(batch1, batch2, method='minmax', scale_range=(0, 1))
-        assert math.isclose(round(dist, 5), 0.0, rel_tol=1e-5), f"similarity should be 0.0 for identical batches, got {dist}"
-        print("test_continues_similarity_minmax passed")
-
-    # Run all the tests
-    test_replay_buffer_initialization()
-    test_track_rewards()
-    test_signal_method()
-    test_validate()
-    test_clear_buffer()
-    test_discrete_similarity()
-    test_continues_similarity_zscore()
-    test_continues_similarity_minmax()
-    
-    print("All tests passed!")

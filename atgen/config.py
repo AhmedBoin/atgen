@@ -8,10 +8,12 @@ from .utils import evolve, follow, copy, skip
 
 
 class ATGENConfig:
-    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, 
-                 perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3,
-                 speciation_level=0, threshold=0.01, log_level=1, default_activation=ActiSwitch(nn.ReLU(), True), activation_mutation=0.5, difficulty=1, 
-                 random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, elitism=True, buffer_update=False,
+    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, crossover_method="hyper", crossover_param=0.5,
+                 mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, mutation_method="gaussian",
+                 perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, patience=10,
+                 wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3, speciation_level="layer", log_level=1, activation_mutation=0.5, difficulty=1, 
+                 default_activation=ActiSwitch(nn.ReLU(), True),
+                 random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, elitism=True,
                  remove_mutation=True, linear_start=True, select_top_only=False, save_every_generation=True,
                  extra_evolve=None, extra_follow=None, extra_copy=None, extra_skip=None, verbose=True):
 
@@ -19,6 +21,8 @@ class ATGENConfig:
         self.crossover_rate = crossover_rate
         self.crossover_decay = crossover_decay
         self.min_crossover = min_crossover
+        self.crossover_method = crossover_method # single_point, two_point, uniform, arithmetic, blend, npoint, hux, order, pmx, hyper
+        self.crossover_param = crossover_param
         self.dynamic_dropout_population = dynamic_dropout_population
         self.single_offspring = single_offspring
         self.select_top_only = select_top_only
@@ -27,28 +31,29 @@ class ATGENConfig:
         self.mutation_rate = mutation_rate
         self.mutation_decay = mutation_decay
         self.min_mutation = min_mutation
+        self.mutation_method = mutation_method # gaussian, uniform, swap, scramble, inversion
         self.perturbation_rate = perturbation_rate
         self.perturbation_decay = perturbation_decay
         self.min_perturbation = min_perturbation
         # Extra Mutation setting
+        self.patience = patience
         self.wider_mutation = wider_mutation
         self.deeper_mutation = deeper_mutation
         self.remove_mutation = remove_mutation
         self.activation_mutation = activation_mutation
         self.maximum_depth = maximum_depth
+        self.current_depth = 1
         self.elitism = elitism
 
         self.random_topology = random_topology  
-        self.speciation_level = speciation_level  # 0->layer level, else-> neuron level
+        self.speciation_level = speciation_level  # layer, neuron
         self.difficulty = difficulty
         self.current_difficulty = 1
         self.shared_fitness = shared_fitness
         self.log_level = log_level
         self.save_every_generation = save_every_generation
-        self.buffer_update = buffer_update
 
         # Network setting
-        self.threshold = threshold
         self.default_activation = default_activation
         self.linear_start = linear_start
         self.evolve: Dict[nn.Module, LayerModifier] = evolve
@@ -97,6 +102,8 @@ class ATGENConfig:
             'crossover_rate': self.crossover_rate,
             'crossover_decay': self.crossover_decay,
             'min_crossover': self.min_crossover,
+            'crossover_method': self.crossover_method,
+            'crossover_param': self.crossover_param,
             'dynamic_dropout_population': self.dynamic_dropout_population,
             'single_offspring': self.single_offspring,
             'select_top_only': self.select_top_only,
@@ -104,6 +111,7 @@ class ATGENConfig:
             'mutation_rate': self.mutation_rate,
             'mutation_decay': self.mutation_decay,
             'min_mutation': self.min_mutation,
+            'mutation_method': self.mutation_method,
             'perturbation_rate': self.perturbation_rate,
             'perturbation_decay': self.perturbation_decay,
             'min_perturbation': self.min_perturbation,
@@ -112,6 +120,7 @@ class ATGENConfig:
             'remove_mutation': self.remove_mutation,
             'activation_mutation': self.activation_mutation,
             'maximum_depth': self.maximum_depth,
+            'current_depth': self.current_depth,
             'elitism': self.elitism,
 
             'random_topology': self.random_topology,
@@ -121,9 +130,7 @@ class ATGENConfig:
             'shared_fitness': self.shared_fitness,
             'log_level': self.log_level,
             'save_every_generation': self.save_every_generation,
-            'buffer_update': self.buffer_update,
 
-            'threshold': self.threshold,
             'actiswitch': actiswitch,
             'activation': activation,
             'linear_start': self.linear_start,
@@ -152,6 +159,8 @@ class ATGENConfig:
             crossover_rate=config_data['crossover_rate'],
             crossover_decay=config_data['crossover_decay'],
             min_crossover=config_data['min_crossover'],
+            crossover_method=config_data['crossover_method'],
+            crossover_param=config_data['crossover_param'],
             dynamic_dropout_population=config_data['dynamic_dropout_population'],
             single_offspring=config_data['single_offspring'],
             select_top_only=config_data['select_top_only'],
@@ -159,6 +168,7 @@ class ATGENConfig:
             mutation_rate=config_data['mutation_rate'],
             mutation_decay=config_data['mutation_decay'],
             min_mutation=config_data['min_mutation'],
+            mutation_method=config_data['mutation_method'],
             perturbation_rate=config_data['perturbation_rate'],
             perturbation_decay=config_data['perturbation_decay'],
             min_perturbation=config_data['min_perturbation'],
@@ -175,9 +185,7 @@ class ATGENConfig:
             shared_fitness=config_data['shared_fitness'],
             log_level=config_data['log_level'],
             save_every_generation=config_data['save_every_generation'],
-            buffer_update=config_data['buffer_update'],
 
-            threshold=config_data['threshold'],
             default_activation=default_activation,
             linear_start=config_data['linear_start'],
             verbose=config_data['verbose'],
@@ -187,6 +195,7 @@ class ATGENConfig:
             extra_skip=modifiers['skip']
         )
         loaded_config.current_difficulty = config_data['current_difficulty']
+        loaded_config.current_depth = config_data['current_depth']
         return loaded_config
 
     @classmethod
