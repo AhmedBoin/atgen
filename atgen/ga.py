@@ -143,7 +143,11 @@ class ATGEN:
 
         if self.config.verbose:
             print_stats_table(self.best_fitness, self.metrics, fitness, len(self.population), len(self.population.groups), self.config)
-
+            if self.memory.is_available():
+                print(f"{BLUE}Experience Buffer{RESET_COLOR}: {len(self.memory)}\
+                \n -> {GREEN}Good{RESET_COLOR} (Size: {len(self.memory.good_buffer):<2}, Upper Bound: {round(self.memory.upper_bound, 3):<6}, Minimum Reward: {round(self.memory.good_buffer.min, 3):<6}) \
+                \n -> {RED}Bad {RESET_COLOR} (Size: {len(self.memory.bad_buffer):<2}, Lower Bound: {round(self.memory.lower_bound, 3):<6}, Maximum Reward: {round(self.memory.bad_buffer.max, 3):<6})")
+                    
         return fitness
                 
     def run_generation(self) -> List[float]:
@@ -164,15 +168,7 @@ class ATGEN:
         if self.check_criteria(results):
             return results
 
-        # use best genome to create experiences
-        if self.is_overridden("experiences_fn"):
-            print(f"{BLUE}Updating Experience Buffer{RESET_COLOR}...")
-            model = self.population.best_individual()
-            self.experiences_fn(model)
-            print(f"{BLUE}Memory Size{RESET_COLOR}: {len(self.memory)}\
-            \n -> {GREEN}Good{RESET_COLOR} (Size: {len(self.memory.good_buffer):<2}, Upper Bound: {round(self.memory.upper_bound, 3):<6}, Minimum Reward: {round(self.memory.good_buffer.min, 3):<6}) \
-            \n -> {RED}Bad {RESET_COLOR} (Size: {len(self.memory.bad_buffer):<2}, Lower Bound: {round(self.memory.lower_bound, 3):<6}, Maximum Reward: {round(self.memory.bad_buffer.max, 3):<6})")
-        
+
         # implement pre_generation if required
         if self.is_overridden("pre_generation"):
             print(f"{BLUE}Pre-Generation Fn in Execution...{RESET_COLOR}")
@@ -229,6 +225,11 @@ class ATGEN:
         if self.is_overridden("post_generation"):
             print(f"{BLUE}Post-Generation Fn in Execution...{RESET_COLOR}")
             self.post_generation()
+
+        # use best genome to create experiences
+        if self.is_overridden("experiences_fn"):
+            print(f"{BLUE}Experience Fn phase in Execution.{RESET_COLOR}")
+            self.experiences_fn(self.population.best_individual())
 
         # smooth the generation networks a little back propagation based method
         if self.is_overridden("backprob_fn"):

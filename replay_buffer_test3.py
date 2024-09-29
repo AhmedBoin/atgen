@@ -26,7 +26,7 @@ class VAE(nn.Module):
     def __init__(self, latent_dim=10):
         super(VAE, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(6, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
+            nn.Conv2d(3, 16, kernel_size=4, stride=2, padding=1),  # [96, 96, 3] -> [48, 48, 16]
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1),  # [48, 48, 16] -> [24, 24, 32]
             nn.ReLU(),
@@ -41,7 +41,7 @@ class VAE(nn.Module):
             nn.ReLU(),
             nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # [24, 24, 32] -> [48, 48, 16]
             nn.ReLU(),
-            nn.ConvTranspose2d(16, 6, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
+            nn.ConvTranspose2d(16, 3, kernel_size=4, stride=2, padding=1),   # [48, 48, 16] -> [96, 96, 3]
             nn.Sigmoid()
         )
     
@@ -73,7 +73,7 @@ class VAE(nn.Module):
     def reduce(self, x):
         """Use the encoder to extract the latent representation (mu)."""
         mu, _ = self.encode(x)
-        return mu
+        return mu.view(1, -1)
 
 # Loss function for VAE (Reconstruction loss + KL divergence)
 def vae_loss(reconstructed, original, mu, logvar):
@@ -83,12 +83,12 @@ def vae_loss(reconstructed, original, mu, logvar):
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(deeper_mutation=1)
-        memory = ReplayBuffer(buffer_size=5, steps=70, dilation=0, similarity_cohort=50, accumulative_reward=True, prioritize=False)
+        config = ATGENConfig(deeper_mutation=1, difficulty=3)
+        memory = ReplayBuffer(buffer_size=5, steps=20, dilation=0, similarity_cohort=50, accumulative_reward=True, prioritize=True, patience=2)
         super().__init__(population_size, model, config, memory)
-        self.autoencoder = VAE(latent_dim=10).to(device)
-        try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
-        except: pass
+        self.autoencoder = VAE(latent_dim=3).to(device)
+        # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
+        # except: pass
         self.criterion = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
         self.lr_decay = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.80)
@@ -101,17 +101,15 @@ class NeuroEvolution(ATGEN):
         env = gym.make(game, max_episode_steps=self.steps)
         total_reward = 0
         state, info = env.reset()
-        memory = deque(maxlen=6)
-        for _ in range(5):
-            memory.append(np.asarray(Image.fromarray(state).convert('L')))
         while True:
-            memory.append(np.asarray(Image.fromarray(state).convert('L')))
-            state = np.stack(memory, 0)
-            state = torch.FloatTensor(state/255)#.permute(2, 0, 1)
+            state = torch.FloatTensor(state/255).permute(2, 0, 1)
             self.buffer.append(state)
             feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
-            action = model(feature).squeeze(0).detach().cpu().numpy()
+            track_action = model(feature)
+            action = track_action.squeeze(0).detach().cpu().numpy()
             state, reward, terminated, truncated, info = env.step(action)
+            tracked_reward = reward if reward > 0 else (- np.abs(tracked_reward))
+            self.memory.track(feature, track_action, tracked_reward)
             total_reward += reward
             
             if terminated or truncated:
@@ -120,36 +118,14 @@ class NeuroEvolution(ATGEN):
         print(self.steps, end="\r")
         return total_reward
     
-    @torch.no_grad()
-    def experiences_fn(self, model: nn.Sequential):
-        epochs = 3
-        env = gym.make(game, max_episode_steps=self.steps)
-        for _ in range(epochs):
-            state, info = env.reset()
-            memory = deque(maxlen=6)
-            for _ in range(5):
-                memory.append(np.asarray(Image.fromarray(state).convert('L')))
-            while True:
-                memory.append(np.asarray(Image.fromarray(state).convert('L')))
-                state = np.stack(memory, 0)
-                state = torch.FloatTensor(state/255)#.permute(2, 0, 1)
-                self.buffer.append(state)
-                feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
-                track_action = model(feature)
-                action = track_action.squeeze(0).detach().cpu().numpy()
-                state, reward, terminated, truncated, info = env.step(action)
-                self.memory.track(feature, track_action, reward)
-
-                if terminated or truncated:
-                    break
-        env.close()
-    
     def pre_generation(self):
         if self.my_fitness < self.best_fitness:
             self.my_fitness = self.best_fitness
             self.steps += 50
         else:
             self.steps += 10
+        if self.steps > 900:
+            self.steps = 900
         for epoch in range(50):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)
@@ -165,35 +141,29 @@ class NeuroEvolution(ATGEN):
     
 
 if __name__ == "__main__":
-    model = nn.Sequential(nn.Linear(10, 3), nn.Tanh()).to(device)
+    model = nn.Sequential(nn.Linear(3, 3), nn.Tanh()).to(device)
     ne = NeuroEvolution(50, model)
-    # ne.load()
-    ne.evolve(fitness=1000, save_name="CarRacing", metrics=0, plot=True)
+    # ne.load("CarRacing")
+    ne.evolve(fitness=900, log_name="CarRacing", metrics=0, plot=True)
     
-    # model = ne.population.best_individual()
+    
     env = gym.make(game, render_mode="human")
     state, info = env.reset()
-    memory = deque(maxlen=6)
-    for _ in range(5):
-        memory.append(np.asarray(Image.fromarray(state).convert('L')))
     total_reward = 0
     while True:
         for i, individual in enumerate(ne.population):
-            # individual = ne.best_individual
+            individual = ne.best_individual
+            steps = 0
             while True:
+                steps += 1
                 with torch.no_grad():
-                    memory.append(np.asarray(Image.fromarray(state).convert('L')))
-                    state = np.stack(memory, 0)
-                    state = torch.FloatTensor(state/255)#.permute(2, 0, 1)
-                    action = individual.model(ne.autoencoder.reduce(state.unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
+                    action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:
-                        print(f"{i} reward: {total_reward}")
+                        print(f"{i} reward: {total_reward} in {steps} steps")
                         total_reward = 0
                         state, info = env.reset()
-                        for _ in range(5):
-                            memory.append(np.asarray(Image.fromarray(state).convert('L')))
                         break
 
     

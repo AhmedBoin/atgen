@@ -108,6 +108,8 @@ class ReplayBuffer:
         self.prioritize = prioritize
         self.patience = patience
 
+    def is_available(self) -> bool:
+        return self.good_buffer.maxlen > 0 and self.steps > 0
 
     @property
     def size(self) -> int:
