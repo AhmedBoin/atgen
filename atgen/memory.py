@@ -54,6 +54,9 @@ class CustomDeque(deque, Generic[TypeVar('T')]):
     
     def __str__(self) -> str:
         return f"{[i for i in self]}"
+    
+    def __len__(self) -> int:
+        return super().__len__()
 
 
 def discrete_similarity(old_actions: torch.Tensor, new_actions: torch.Tensor, actions: int) -> float:
@@ -160,6 +163,7 @@ class ReplayBuffer:
             self.currant_action = Action.Normal
 
         self.step(state, action, reward)
+        # input(f"{self.state}")
         reward = self.reward[-1] if self.accumulative_reward else sum(self.reward)
         if reward >= self.upper_bound:
             if self.currant_action != Action.Good: 

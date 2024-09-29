@@ -10,61 +10,44 @@ import gymnasium as gym
 import warnings
 
 
-
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 game = "LunarLander-v2"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(maximum_depth=1, difficulty=5, mutation_method="uniform", crossover_method="blend")
+        config = ATGENConfig(maximum_depth=1)
         memory = ReplayBuffer(buffer_size=4, steps=50, dilation=20, discrete_action=True, accumulative_reward=True, similarity_cohort=10)
         
-        super().__init__(population_size, model, config, memory)
+        super().__init__(population_size, model, config)#, memory)
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
         env = gym.make(game)
         total_reward = 0
         state, info = env.reset()
-        while True:
-            action = model(torch.FloatTensor(state).unsqueeze(0)).argmax().item()
-            next_state, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
-            state = next_state
-            
-            if terminated or truncated:
-                break
-        env.close()
-        return total_reward
-    
-
-    @torch.no_grad()
-    def experiences_fn(self, model: nn.Sequential):
-        epochs = 10
-        env = gym.make(game)
-        total_reward = 0
-        for _ in range(epochs):
-            state, info = env.reset()
+        epochs = 5
+        for i in range(epochs):
             while True:
                 state = torch.FloatTensor(state).unsqueeze(0)
                 action = model(state).argmax()
                 next_state, reward, terminated, truncated, info = env.step(action.item())
                 total_reward += reward
-                self.memory.track(state, action, total_reward)
+                # self.memory.track(state, action, total_reward)
                 state = next_state
                 
                 if terminated or truncated:
-                    total_reward = 0
+                    state, info = env.reset()
                     break
         env.close()
+        return total_reward / epochs
     
 
 if __name__ == "__main__":
     model = nn.Sequential(nn.Linear(8, 4))
     ne = NeuroEvolution(500, model)
     # ne.load("LunarLander")
-    ne.evolve(fitness=250, save_name="LunarLander", metrics=0, plot=True)
+    ne.evolve(fitness=250, log_name="LunarLander", metrics=0, plot=True)
     
     model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")

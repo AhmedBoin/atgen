@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 import numpy as np
+import random
+
 
 
 from .layers import (
@@ -174,134 +176,155 @@ def stable_softmax(x: List[float]) -> np.ndarray:
 """
 CrossOver Types
 """
+import torch
+import random
+import numpy as np
+
+def flatten_params(model):
+    # Flatten all parameters of the model into a 1D tensor
+    return torch.cat([param.data.reshape(-1) for param in model.parameters()])
+
+def rebuild_params(model, flat_params):
+    # Convert flat_params back to the original shapes of the model's parameters
+    param_start = 0
+    for param in model.parameters():
+        param_size = param.numel()
+        param.data.copy_(flat_params[param_start:param_start + param_size].view(param.size()))
+        param_start += param_size
+
 def single_point_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    crossover_point = len(list(dna.parameters())) // 2
-    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
-        if i > crossover_point:
-            param1.data = param2.data.clone()
+    # Flatten parameters
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    # Single-point crossover
+    crossover_point = len(flat_dna) // 2
+    child_flat = torch.cat((flat_dna[:crossover_point], flat_rna[crossover_point:]))
+    
+    # Rebuild child model
+    rebuild_params(dna, child_flat)
 
 def two_point_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    num_params = len(list(dna.parameters()))
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    num_params = len(flat_dna)
     point1 = num_params // 3
     point2 = 2 * num_params // 3
     
-    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
-        if point1 < i < point2:
-            param1.data = param2.data.clone()
+    child_flat = torch.cat((flat_dna[:point1], flat_rna[point1:point2], flat_dna[point2:]))
+    
+    rebuild_params(dna, child_flat)
 
 def uniform_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    for param1, param2 in zip(dna.parameters(), rna.parameters()):
-        mask = torch.rand_like(param1.data) > 0.5
-        param1.data = torch.where(mask, param1.data, param2.data)
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    mask = torch.rand_like(flat_dna) > 0.5
+    child_flat = torch.where(mask, flat_dna, flat_rna)
+    
+    rebuild_params(dna, child_flat)
 
 def arithmetic_crossover(dna: nn.Sequential, rna: nn.Sequential, alpha=0.5):
-    for param1, param2 in zip(dna.parameters(), rna.parameters()):
-        param1.data = alpha * param1.data + (1 - alpha) * param2.data
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    child_flat = alpha * flat_dna + (1 - alpha) * flat_rna
+    
+    rebuild_params(dna, child_flat)
 
 def blend_crossover(dna: nn.Sequential, rna: nn.Sequential, alpha=0.5):
-    for param1, param2 in zip(dna.parameters(), rna.parameters()):
-        min_val = torch.min(param1.data, param2.data)
-        max_val = torch.max(param1.data, param2.data)
-        diff = max_val - min_val
-        param1.data = (min_val - alpha * diff) + torch.rand_like(param1.data) * (1 + 2 * alpha) * diff
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    min_val = torch.min(flat_dna, flat_rna)
+    max_val = torch.max(flat_dna, flat_rna)
+    diff = max_val - min_val
+    child_flat = (min_val - alpha * diff) + torch.rand_like(flat_dna) * (1 + 2 * alpha) * diff
+    
+    rebuild_params(dna, child_flat)
 
 def n_point_crossover(dna: nn.Sequential, rna: nn.Sequential, n=3):
-    num_params = len(list(dna.parameters()))
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    num_params = len(flat_dna)
     crossover_points = sorted([torch.randint(0, num_params, (1,)).item() for _ in range(n)])
     
     swap = False
-    for i, (param1, param2) in enumerate(zip(dna.parameters(), rna.parameters())):
+    child_flat = flat_dna.clone()
+    for i in range(num_params):
         if i in crossover_points:
             swap = not swap
         if swap:
-            param1.data = param2.data.clone()
+            child_flat[i] = flat_rna[i]
+    
+    rebuild_params(dna, child_flat)
 
 def hux_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    for param1, param2 in zip(dna.parameters(), rna.parameters()):
-        mask = torch.rand_like(param1.data) > 0.5
-        param1.data = torch.where(mask, param1.data, param2.data)
-        param2.data = torch.where(mask, param2.data, param1.data)
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    mask = torch.rand_like(flat_dna) > 0.5
+    child_flat = torch.where(mask, flat_dna, flat_rna)
+    
+    rebuild_params(dna, child_flat)
 
 def order_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    num_params = len(list(dna.parameters()))
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
+    
+    num_params = len(flat_dna)
     point1, point2 = sorted(torch.randint(0, num_params, (2,)).tolist())
 
-    child_params = [None] * num_params
-    child_params[point1:point2] = list(dna.parameters())[point1:point2]
+    child_flat = flat_dna.clone()
+    child_flat[point1:point2] = flat_rna[point1:point2]
     
-    remaining_genes = [param for param in rna.parameters() if param not in child_params]
+    remaining_genes = [gene for gene in flat_rna if gene not in child_flat[point1:point2]]
     for i in range(num_params):
-        if child_params[i] is None:
-            child_params[i] = remaining_genes.pop(0)
+        if i < point1 or i >= point2:
+            try: child_flat[i] = remaining_genes.pop(0)
+            except: pass
     
-    for i, param in enumerate(dna.parameters()):
-        param.data = child_params[i].data.clone()
-
-import torch
-import random
+    rebuild_params(dna, child_flat)
 
 def pmx_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    """
-    Perform Partially Mapped Crossover (PMX) on two neural networks (dna and rna).
-    This operation swaps a segment of weights between the two networks and ensures
-    a consistent mapping between the swapped segments.
+    flat_dna = flatten_params(dna)
+    flat_rna = flatten_params(rna)
 
-    Parameters:
-    - dna: The first parent network (PyTorch model)
-    - rna: The second parent network (PyTorch model)
-
-    The function modifies the `dna` network in place to represent the child.
-    """
-
-    # Get the list of parameters (weights) from both networks
-    dna_params = list(dna.parameters())
-    rna_params = list(rna.parameters())
-
-    num_params = len(dna_params)
-
-    # Select two random crossover points
+    num_params = len(flat_dna)
     point1, point2 = sorted(random.sample(range(num_params), 2))
-
-    # Initialize a mapping dictionary for the PMX operation
+    
+    # Initialize mapping
     mapping = {}
-
+    
     # Perform PMX within the selected segment
+    child_flat = flat_dna.clone()
     for i in range(point1, point2 + 1):
-        dna_value = dna_params[i].clone()
-        rna_value = rna_params[i].clone()
-
-        # Swap the parameter values between dna and rna within the segment
-        dna_params[i].data, rna_params[i].data = rna_value.data, dna_value.data
-
-        # Update the mapping for the PMX operation
-        mapping[dna_value.item()] = rna_value.item()
-
+        mapping[flat_dna[i].item()] = flat_rna[i].item()
+        child_flat[i] = flat_rna[i]
+    
     # Fix the mapping outside of the crossover segment
     for i in range(num_params):
         if i < point1 or i > point2:
-            original_value = dna_params[i].item()
+            original_value = flat_dna[i].item()
             while original_value in mapping:
                 original_value = mapping[original_value]
-
-            dna_params[i].data.fill_(original_value)
-
-def hyper_crossover(dna: nn.Sequential, rna: nn.Sequential):
-    for param1, param2 in zip(dna.parameters(), rna.parameters()):
-        mask = torch.rand_like(param1.data) > 0.5
-        param1.data, param2.data = torch.where(mask, param1.data, param2.data), torch.where(mask, param2.data, param1.data)
+            child_flat[i] = torch.tensor(original_value)
+    
+    rebuild_params(dna, child_flat)
 
 
 crossover_dict = {
     'single_point': single_point_crossover,
     'two_point': two_point_crossover,
-    'uniform': uniform_crossover, # prefer to use
-    'arithmetic': arithmetic_crossover,
+    'uniform': uniform_crossover, 
+    'arithmetic': arithmetic_crossover, # prefer to use
     'blend': blend_crossover, # prefer to use
     'npoint': n_point_crossover,
     'hux': hux_crossover,
-    'order': order_crossover, # prefer not to use
-    'pmx': pmx_crossover, # prefer not to use
-    'hyper': hyper_crossover,
+    'order': order_crossover, # prefer to use
+    'pmx': pmx_crossover,
 }
 
 
@@ -330,4 +353,4 @@ def scramble_mutation(param: torch.nn.Parameter, mutation_rate: float):
 def inversion_mutation(param: torch.nn.Parameter, mutation_rate: float):
     if torch.rand(1).item() < mutation_rate:
         start, end = sorted(torch.randint(0, param.size(0), (2,)).tolist())
-        param[start:end] = param[start:end][::-1]  # Reverse the segment
+        param.data[start:end] = torch.flip(param.data[start:end], dims=[0])  # Reverse the segment

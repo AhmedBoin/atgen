@@ -7,20 +7,27 @@ import torch.nn.functional as F
 
 from atgen.ga import ATGEN
 from atgen.config import ATGENConfig
+from atgen.memory import ReplayBuffer
 from atgen.layers.activations import ActiSwitch
-
-from PIL import Image
 
 import gymnasium as gym
 import warnings
 
-from atgen.memory import ReplayBuffer
+import numpy as np
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 game = "CarRacing-v2"
 device = "mps"
+
+# convert to suitable action space [(-1:1), (0:1), (0:1)]
+def normalize(arr):
+    first_value = arr[0]
+    normalized_values = (arr[1:] + 1) / 2
+    result = np.array([first_value, *normalized_values])
+    return result
+
 
 class VAE(nn.Module):
     def __init__(self, latent_dim=10):
@@ -84,7 +91,7 @@ def vae_loss(reconstructed, original, mu, logvar):
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
         config = ATGENConfig(deeper_mutation=1, difficulty=3)
-        memory = ReplayBuffer(buffer_size=5, steps=20, dilation=0, similarity_cohort=50, accumulative_reward=True, prioritize=True, patience=2)
+        memory = ReplayBuffer(buffer_size=5, steps=70, dilation=0, similarity_cohort=50, accumulative_reward=True, prioritize=True, patience=2)
         super().__init__(population_size, model, config, memory)
         self.autoencoder = VAE(latent_dim=3).to(device)
         # try: self.autoencoder.load_state_dict(torch.load("autoencoder.pth"))
@@ -107,7 +114,7 @@ class NeuroEvolution(ATGEN):
             feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
             track_action = model(feature)
             action = track_action.squeeze(0).detach().cpu().numpy()
-            state, reward, terminated, truncated, info = env.step(action)
+            state, reward, terminated, truncated, info = env.step(normalize(action))
             tracked_reward = reward if reward > 0 else (- np.abs(tracked_reward))
             self.memory.track(feature, track_action, tracked_reward)
             total_reward += reward
@@ -158,7 +165,7 @@ if __name__ == "__main__":
                 steps += 1
                 with torch.no_grad():
                     action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
-                    state, reward, terminated, truncated, info = env.step(action)
+                    state, reward, terminated, truncated, info = env.step(normalize(action))
                     total_reward += reward
                     if terminated or truncated:
                         print(f"{i} reward: {total_reward} in {steps} steps")

@@ -6,7 +6,7 @@ from typing import List, Tuple, Union
 import torch
 from torch import nn
 
-from .utils import BLUE, BOLD, RESET_COLOR, arithmetic_crossover, blend_crossover, gaussian_mutation, hux_crossover, hyper_crossover, inversion_mutation, n_point_crossover, order_crossover, pmx_crossover, scramble_mutation, single_point_crossover, swap_mutation, two_point_crossover, uniform_crossover, uniform_mutation
+from .utils import BLUE, BOLD, RESET_COLOR, arithmetic_crossover, blend_crossover, gaussian_mutation, hux_crossover, inversion_mutation, n_point_crossover, order_crossover, pmx_crossover, scramble_mutation, single_point_crossover, swap_mutation, two_point_crossover, uniform_crossover, uniform_mutation
 from .layers import ActiSwitch, EvolveAction
 from .config import ATGENConfig
 
@@ -327,8 +327,6 @@ class DNA:
                 order_crossover(dna, rna)
             elif self.config.crossover_method == "pmx":
                 pmx_crossover(dna, rna)
-            elif self.config.crossover_method == "hyper":
-                hyper_crossover(dna, rna)
             
             return DNA(dna, self.config), DNA(rna, self.config)
         else:

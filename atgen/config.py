@@ -8,7 +8,7 @@ from .utils import evolve, follow, copy, skip
 
 
 class ATGENConfig:
-    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, crossover_method="hyper", crossover_param=0.5,
+    def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, crossover_method="order", crossover_param=0.5,
                  mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, mutation_method="gaussian",
                  perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, patience=10,
                  wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3, speciation_level="layer", log_level=1, activation_mutation=0.5, difficulty=1, 
@@ -21,7 +21,7 @@ class ATGENConfig:
         self.crossover_rate = crossover_rate
         self.crossover_decay = crossover_decay
         self.min_crossover = min_crossover
-        self.crossover_method = crossover_method # single_point, two_point, uniform, arithmetic, blend, npoint, hux, order, pmx, hyper
+        self.crossover_method = crossover_method # single_point, two_point, uniform, arithmetic, blend, npoint, hux, order, pmx
         self.crossover_param = crossover_param
         self.dynamic_dropout_population = dynamic_dropout_population
         self.single_offspring = single_offspring
