@@ -6,6 +6,7 @@ This repository contains the implementation of ATGEN, focusing on dynamically ev
 ---
 
 ### Key Features
+![Network Evolution](./network_evolution.png)
 - **Dynamic Evolution of Network Topology and Weights**: ATGEN allows for networks to evolve both structurally (adding/removing layers, adjusting filters) and parametrically (modifying weights), adapting to the problem at hand.
 - **Exploration-Exploitation Tradeoff**: ATGEN starts with a high mutation rate for global exploration, gradually decaying to emphasize exploitation as the search progresses. This strategy ensures that the algorithm quickly discovers promising solutions and refines them efficiently.
 - **Support for Continuous and Discrete Action Spaces**: ATGEN is capable of optimizing models that operate in both continuous and discrete action spaces, making it highly versatile for a variety of RL tasks.
