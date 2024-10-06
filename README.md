@@ -59,6 +59,4 @@ If you use ATGEN in your research or projects, please cite the paper:
 ### License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
---- 
-
-Let me know if you'd like to adjust any parts!
+---
