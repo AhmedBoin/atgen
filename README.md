@@ -20,6 +20,7 @@ This repository contains the implementation of ATGEN, focusing on dynamically ev
 3. **Evolution Process**: ATGEN evolves the population over generations. High-fitness individuals are selected for crossover and mutation to create offspring, while low-fitness individuals are discarded. A portion of the population, known as elites, is preserved to maintain high-quality solutions.
 4. **Exploration to Exploitation Shift**: Initially, ATGEN focuses on exploration by using high mutation and crossover rates, which gradually decay to favor exploitation as the search narrows in on promising regions of the solution space.
 5. **Similarity Calculation**: For continuous action spaces, ATGEN uses cosine similarity to compare individuals, while for discrete actions, one-hot encoding combined with exponential moving average (EMA) is employed to smooth actions and simulate a continuous space. The most similar individuals in each cohort are selected to move forward.
+![Similarity Cohort Curve](./sim.jpeg)
 ---
 
 ### Applications
