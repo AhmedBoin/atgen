@@ -38,7 +38,7 @@ ATGEN is designed to excel in environments that require both neural network opti
 
 2. **Run an Example**: You can test ATGEN on a simple control task by running the following:
    ```bash
-   python run_experiment.py --config config/car_racing.yaml
+   python run_experiment.py --config config/car_racing.json
    ```
 
 3. **Custom Configurations**: Modify the `ATGENConfig` class or YAML configuration files to adjust parameters such as mutation rates, crossover methods, and population size.
