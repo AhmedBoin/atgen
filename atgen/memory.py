@@ -64,31 +64,50 @@ def discrete_similarity(old_actions: torch.Tensor, new_actions: torch.Tensor, ac
     # Convert to one-hot vectors
     old_actions = F.one_hot(old_actions, num_classes=actions).float()
     new_actions = F.one_hot(new_actions, num_classes=actions).float()
-
-    # Exponential Moving Average (EMA) smoothing
-    smoothing_factor = 1/actions
-    old_smoothed = torch.zeros_like(old_actions)
-    old_smoothed[0] = old_actions[0]
-    for i in range(1, len(old_actions)):
-        old_smoothed[i] = smoothing_factor * old_actions[i] + (1 - smoothing_factor) * old_smoothed[i - 1]
-    new_smoothed = torch.zeros_like(new_actions)
-    new_smoothed[0] = new_actions[0]
-    for i in range(1, len(new_actions)):
-        new_smoothed[i] = smoothing_factor * new_actions[i] + (1 - smoothing_factor) * new_smoothed[i - 1]
     
     # Calculate similarity between two sequences
-    return continues_similarity(old_smoothed, new_smoothed)
+    return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
 
 
 def continues_similarity(batch1: torch.Tensor, batch2: torch.Tensor) -> float:
     """Calculate similarity of Continues actions"""
-    return F.relu(F.cosine_similarity(batch1, batch2)).mean().item()
+    return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
+
+
+class Cohort:
+    def __init__(self):
+        self.models: List[nn.Sequential] = []
+        self.g: List[float] = []
+        self.b: List[float] = []
+
+    def __len__(self):
+        return len(self.models)
+    
+    def append(self, g, b, model):
+        self.models.append(model)
+        self.g.append(g)
+        self.b.append(b)
+
+    def clear(self):
+        self.models.clear()
+        self.g.clear()
+        self.b.clear()
+
+    def similar(self) -> nn.Sequential:
+        """min max normalization"""
+        g_max = max(self.g)
+        g_min = min(self.g)
+        b_max = max(self.b)
+        b_min = min(self.b)
+        similarity = [(((g-g_min)/(g_max-g_min+1e-8)) + ((b-b_min)/(b_max-b_min+1e-8))/2) for g, b in zip(self.g, self.b)]
+        idx = similarity.index(max(similarity))
+        return self.models[idx]
 
 
 class ReplayBuffer:
     def __init__(self, buffer_size: int = 0, steps: int = 0, dilation: int = 0, discrete_action: bool = False, 
                  similarity_threshold: float = 1.0, similarity_cohort: int = 1, accumulative_reward=False, 
-                 reward_range=(0, 0), prioritize: bool = True, patience=10):
+                 prioritize: bool = True, patience=10):
         
         self.steps: int = steps
         self.dilation: int = dilation
@@ -103,8 +122,8 @@ class ReplayBuffer:
         self.similarity_cohort: int = similarity_cohort
         self.offsprings: List[Tuple[float, nn.Sequential]] = []
 
-        self.upper_bound = max(reward_range)
-        self.lower_bound = min(reward_range)
+        self.upper_bound = None
+        self.lower_bound = None
         self.currant_action = Action.Normal
 
         self.accumulative_reward = accumulative_reward
@@ -117,6 +136,12 @@ class ReplayBuffer:
     @property
     def size(self) -> int:
         return self.good_buffer.maxlen
+    
+    def new(self):
+        self.state.clear()
+        self.action.clear()
+        self.reward.clear()
+        self.currant_action = Action.Normal
 
 
     def step(self, state, action, reward):
@@ -158,21 +183,21 @@ class ReplayBuffer:
     def track(self, state, action, reward):
         while len(self.state) < self.steps:
             self.step(state, action, reward)
+            self.currant_action = Action.Normal
+        if self.upper_bound is None:
             self.upper_bound = reward
             self.lower_bound = reward
-            self.currant_action = Action.Normal
 
         self.step(state, action, reward)
-        # input(f"{self.state}")
         reward = self.reward[-1] if self.accumulative_reward else sum(self.reward)
         if reward >= self.upper_bound:
+            self.upper_bound = reward
             if self.currant_action != Action.Good: 
-                self.upper_bound = reward
                 self.signal(Action.Good, reward)
             self.currant_action = Action.Good
         elif reward <= self.lower_bound:
+            self.lower_bound = reward
             if self.currant_action != Action.Bad:
-                self.lower_bound = reward
                 self.signal(Action.Bad, reward)
             self.currant_action = Action.Bad
         else:
