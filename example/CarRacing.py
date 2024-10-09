@@ -105,6 +105,7 @@ class NeuroEvolution(ATGEN):
             feature = self.autoencoder.reduce(state.unsqueeze(0).to(device))
             track_action = model(feature)
             action = track_action.squeeze(0).detach().cpu().numpy()
+            action[0] = action[0] * 2 - 1
             state, reward, terminated, truncated, info = env.step(action)
             tracked_reward = reward if reward > 0 else (- np.abs(tracked_reward))
             self.memory.track(feature, track_action, tracked_reward)
@@ -124,7 +125,7 @@ class NeuroEvolution(ATGEN):
             self.steps += 10
         if self.steps > 900:
             self.steps = 900
-        for epoch in range(50):
+        for epoch in range(100):
             input_images = random.sample(self.buffer, 128)
             input_images = torch.stack(input_images).to(device)
             reconstructed, mu, logvar = self.autoencoder(input_images)
@@ -139,7 +140,7 @@ class NeuroEvolution(ATGEN):
     
 
 if __name__ == "__main__":
-    model = nn.Sequential(nn.Linear(3, 3), nn.Tanh()).to(device)
+    model = nn.Sequential(nn.Linear(3, 3), nn.Sigmoid()).to(device)
     ne = NeuroEvolution(50, model)
     # ne.load("CarRacing")
     ne.evolve(fitness=900, log_name="CarRacing", metrics=0, plot=True)
@@ -156,6 +157,7 @@ if __name__ == "__main__":
                 steps += 1
                 with torch.no_grad():
                     action = individual.model(ne.autoencoder.reduce(torch.FloatTensor(state/255).permute(2, 0, 1).unsqueeze(0).to(device))).cpu().squeeze(0).detach().numpy()
+                    action[0] = action[0] * 2 - 1
                     state, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
                     if terminated or truncated:

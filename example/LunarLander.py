@@ -16,10 +16,10 @@ game = "LunarLander-v2"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(maximum_depth=1)
-        memory = ReplayBuffer(buffer_size=4, steps=50, dilation=20, discrete_action=True, accumulative_reward=True, similarity_cohort=10)
+        config = ATGENConfig(maximum_depth=1, elitism=False)
+        memory = ReplayBuffer(buffer_size=4, steps=50, dilation=20, discrete_action=True, accumulative_reward=True, similarity_cohort=50)
         
-        super().__init__(population_size, model, config)#, memory)
+        super().__init__(population_size, model, config, memory)
 
     @torch.no_grad()
     def fitness_fn(self, model: nn.Sequential):
@@ -33,11 +33,12 @@ class NeuroEvolution(ATGEN):
                 action = model(state).argmax()
                 next_state, reward, terminated, truncated, info = env.step(action.item())
                 total_reward += reward
-                # self.memory.track(state, action, total_reward)
+                self.memory.track(state, action, total_reward)
                 state = next_state
                 
                 if terminated or truncated:
                     state, info = env.reset()
+                    self.memory.new()
                     break
         env.close()
         return total_reward / epochs

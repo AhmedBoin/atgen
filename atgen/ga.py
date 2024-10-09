@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 import inspect
 import random
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 import pickle
 
 
@@ -75,11 +75,11 @@ class ATGEN:
     def evaluate_learn(self):
         '''backpropagation phase'''
 
-        # for individual in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
-        #     self.backprob_fn(individual.model)
+        for individual in tqdm(self.population, desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100):
+            self.backprob_fn(individual.model)
 
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            list(tqdm(executor.map(lambda individual: self.backprob_fn(individual.model), self.population), desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100, total=len(self.population)))
+        # with concurrent.futures.ProcessPoolExecutor() as executor:
+        #     list(tqdm(executor.map(lambda individual: self.backprob_fn(individual.model), self.population), desc=f"{BLUE}Generation Refinement{RESET_COLOR}", ncols=100, total=len(self.population)))
 
 
     def select_parents(self) -> Tuple[DNA, DNA]:

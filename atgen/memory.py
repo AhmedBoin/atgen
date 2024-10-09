@@ -1,15 +1,14 @@
 """
 The Revival of Natural Selection
 """
+
 import pickle
-from typing import Dict, Generic, List, Tuple, TypeVar, Union
+from typing import Generic, List, Tuple, Deque, TypeVar
 from collections import deque
-from itertools import chain
-from typing import Deque
+
 import torch
 from torch import nn
 import torch.nn.functional as F
-import math
 
 
 class Action:
@@ -69,10 +68,41 @@ def discrete_similarity(old_actions: torch.Tensor, new_actions: torch.Tensor, ac
     return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
 
 
-def continues_similarity(batch1: torch.Tensor, batch2: torch.Tensor) -> float:
-    """Calculate similarity of Continues actions"""
+def continues_similarity(old_actions, new_actions, num_discrete_actions):
     return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
+    """Calculate similarity of Continues actions"""
+    # Calculate min and max values across both old and new actions for consistency
+    # print(old_actions.shape, new_actions.shape)
+    min_actions = torch.min(torch.cat([old_actions, new_actions], dim=0), dim=0, keepdim=True)[0]
+    max_actions = torch.max(torch.cat([old_actions, new_actions], dim=0), dim=0, keepdim=True)[0]
+    
+    # Create bins for quantization
+    bins = torch.linspace(0, 1, num_discrete_actions + 1, device=old_actions.device)
+    
+    def convert_to_discrete_one_hot(actions):
+        # Normalize actions based on the shared min and max values
+        normalized_actions = (actions - min_actions) / (max_actions - min_actions + 1e-8)
+        
+        # Quantize the normalized actions
+        discrete_actions = torch.bucketize(normalized_actions, bins, right=True) - 1
+        discrete_actions = torch.clamp(discrete_actions, 0, num_discrete_actions - 1)
 
+        # Convert to one-hot encoding and flatten, cast to float
+        one_hot_actions = F.one_hot(discrete_actions, num_classes=num_discrete_actions).float()
+        return one_hot_actions.view(actions.size(0), -1)
+
+    # Convert both old and new actions to one-hot encoded representations
+    old_one_hot = convert_to_discrete_one_hot(old_actions)
+    new_one_hot = convert_to_discrete_one_hot(new_actions)
+    
+    # Calculate cosine similarity between the two sets of actions
+    similarity = F.cosine_similarity(old_one_hot, new_one_hot, dim=1)  # (batch,)
+    
+    # Adjust the similarity range from [-1, 1] to [0, 1] and return the mean similarity
+    adjusted_similarity = (similarity + 1) / 2
+    mean_similarity = adjusted_similarity.mean().item()
+    
+    return mean_similarity
 
 class Cohort:
     def __init__(self):
@@ -103,7 +133,6 @@ class Cohort:
         idx = similarity.index(max(similarity))
         return self.models[idx]
 
-
 class ReplayBuffer:
     def __init__(self, buffer_size: int = 0, steps: int = 0, dilation: int = 0, discrete_action: bool = False, 
                  similarity_threshold: float = 1.0, similarity_cohort: int = 1, accumulative_reward=False, 
@@ -120,7 +149,7 @@ class ReplayBuffer:
         self.discrete_action: bool = discrete_action
         self.similarity_threshold: float = similarity_threshold
         self.similarity_cohort: int = similarity_cohort
-        self.offsprings: List[Tuple[float, nn.Sequential]] = []
+        self.offsprings: Cohort = Cohort()
 
         self.upper_bound = None
         self.lower_bound = None
@@ -181,7 +210,7 @@ class ReplayBuffer:
 
 
     def track(self, state, action, reward):
-        while len(self.state) < self.steps:
+        while len(self.state) < self.state.maxlen:
             self.step(state, action, reward)
             self.currant_action = Action.Normal
         if self.upper_bound is None:
@@ -207,38 +236,37 @@ class ReplayBuffer:
             self.half_clear()
 
 
-    def _validate(self, model: nn.Sequential) -> float:
+    def _validate(self, model: nn.Sequential) -> Tuple[float, float]:
         g_similarity, b_similarity = 0, 0
         if len(self.good_buffer) > 0:
             good_new_action: torch.Tensor = model(self.good_buffer.state)
             if self.discrete_action:
-                g_similarity = discrete_similarity(self.good_buffer.action, good_new_action.argmax(1), good_new_action.shape[1]) * len(self.good_buffer)
+                g_similarity = discrete_similarity(self.good_buffer.action, good_new_action.argmax(1), good_new_action.shape[1])# * len(self.good_buffer)
             else:
-                g_similarity = continues_similarity(self.good_buffer.action, good_new_action) * len(self.good_buffer)
+                g_similarity = continues_similarity(self.good_buffer.action.squeeze(), good_new_action, good_new_action.shape[1])# * len(self.good_buffer)
         if len(self.bad_buffer) > 0:
             bad_new_action: torch.Tensor = model(self.bad_buffer.state)
             if self.discrete_action:
-                b_similarity = (1-discrete_similarity(self.bad_buffer.action, bad_new_action.argmax(1), bad_new_action.shape[1])) * len(self.bad_buffer)
+                b_similarity = (1-discrete_similarity(self.bad_buffer.action, bad_new_action.argmax(1), bad_new_action.shape[1]))# * len(self.bad_buffer)
             else:
-                b_similarity = (1-continues_similarity(self.bad_buffer.action, bad_new_action)) * len(self.bad_buffer)
+                b_similarity = (1-continues_similarity(self.bad_buffer.action.squeeze(), bad_new_action, bad_new_action.shape[1]))# * len(self.bad_buffer)
         if len(self) > 0:
-            similarity = (g_similarity + b_similarity) / len(self)
-            return similarity
+            return (g_similarity, b_similarity)
+            # return similarity
         else:
-            return 1.0
+            return (1.0, 1.0)
         
 
     @torch.no_grad()
     def validate(self, model: nn.Sequential) -> nn.Sequential:
         if len(self.offsprings) < self.similarity_cohort:
-            distance = self._validate(model)
-            if distance >= self.similarity_threshold:
+            g_similarity, b_similarity = self._validate(model)
+            if (g_similarity >= self.similarity_threshold) and (b_similarity >= self.similarity_threshold):
                 self.offsprings.clear()
                 return model
-            self.offsprings.append((distance, model))
+            self.offsprings.append(g_similarity, b_similarity, model)
         else:
-            self.offsprings.sort(key=lambda x: x[0], reverse=True)
-            model = self.offsprings[0][1]
+            model = self.offsprings.similar()
             self.offsprings.clear()
             return model
             
@@ -280,4 +308,3 @@ class ReplayBuffer:
         with open(file_name, 'rb') as file:
             return pickle.load(file)
     
-
