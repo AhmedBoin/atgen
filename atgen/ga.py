@@ -135,10 +135,10 @@ class ATGEN:
             self.last_improvement = 0
         else:
             self.last_improvement += 1
-            if self.config.patience == self.last_improvement:
+            if (self.last_improvement % self.config.patience) == 0:
                 if self.config.current_depth < self.config.maximum_depth:
                     self.config.current_depth += 1
-            if self.memory.patience == self.last_improvement:
+            if (self.last_improvement % self.memory.patience) == 0:
                 self.memory.clear()
 
         if self.config.verbose:
