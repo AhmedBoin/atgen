@@ -12,12 +12,12 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-game = "BipedalWalker-v3"
+game = "MountainCarContinuous-v0"
 
 class NeuroEvolution(ATGEN):
     def __init__(self, population_size: int, model: nn.Sequential):
-        config = ATGENConfig(mutation_decay=0.95, perturbation_decay=0.95, maximum_depth=1)
-        memory = ReplayBuffer(buffer_size=4, steps=70, dilation=20, similarity_cohort=50, accumulative_reward=True)
+        config = ATGENConfig(deeper_mutation=0.01, linear_start=False, patience=1)
+        memory = ReplayBuffer(4, steps=50, similarity_cohort=50)
         super().__init__(population_size, model, config, memory)
 
     @torch.no_grad()
@@ -30,7 +30,7 @@ class NeuroEvolution(ATGEN):
             action = model(state).squeeze(0)
             next_state, reward, terminated, truncated, info = env.step(action.numpy())
             total_reward += reward
-            self.memory.track(state, action, total_reward)
+            self.memory.track(state, action, reward)
             state = next_state
             
             if terminated or truncated:
@@ -41,10 +41,10 @@ class NeuroEvolution(ATGEN):
     
 
 if __name__ == "__main__":
-    model = nn.Sequential(nn.Linear(24, 4), nn.Tanh())
-    ne = NeuroEvolution(200, model)
-    # ne.load("BipedalWalker")
-    ne.evolve(fitness=300, log_name="BipedalWalker", metrics=0, plot=True)
+    model = nn.Sequential(nn.Linear(2, 1), nn.Tanh())
+    ne = NeuroEvolution(500, model)
+    # ne.load("MountainCarContinuous")
+    ne.evolve(fitness=99, log_name="MountainCarContinuous", metrics=0, plot=True)
     
     model = ne.population.best_individual()
     env = gym.make(game, render_mode="human")

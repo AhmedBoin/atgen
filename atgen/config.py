@@ -10,7 +10,7 @@ from .utils import evolve, follow, copy, skip
 class ATGENConfig:
     def __init__(self, crossover_rate=0.8, crossover_decay=1.0, min_crossover=0.5, crossover_method="order", crossover_param=0.5,
                  mutation_rate=0.8, mutation_decay=0.9, min_mutation=0.02, mutation_method="gaussian",
-                 perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, patience=10,
+                 perturbation_rate=0.9, perturbation_decay=0.9, min_perturbation=0.02, patience=3,
                  wider_mutation=0.01, deeper_mutation=0.001, maximum_depth=3, speciation_level="layer", log_level=1, activation_mutation=0.5, difficulty=1, 
                  default_activation=ActiSwitch(nn.ReLU(), True),
                  random_topology=False, single_offspring=True, shared_fitness=True, dynamic_dropout_population=True, elitism=True,

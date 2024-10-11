@@ -69,40 +69,8 @@ def discrete_similarity(old_actions: torch.Tensor, new_actions: torch.Tensor, ac
 
 
 def continues_similarity(old_actions, new_actions, num_discrete_actions):
-    return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
     """Calculate similarity of Continues actions"""
-    # Calculate min and max values across both old and new actions for consistency
-    # print(old_actions.shape, new_actions.shape)
-    min_actions = torch.min(torch.cat([old_actions, new_actions], dim=0), dim=0, keepdim=True)[0]
-    max_actions = torch.max(torch.cat([old_actions, new_actions], dim=0), dim=0, keepdim=True)[0]
-    
-    # Create bins for quantization
-    bins = torch.linspace(0, 1, num_discrete_actions + 1, device=old_actions.device)
-    
-    def convert_to_discrete_one_hot(actions):
-        # Normalize actions based on the shared min and max values
-        normalized_actions = (actions - min_actions) / (max_actions - min_actions + 1e-8)
-        
-        # Quantize the normalized actions
-        discrete_actions = torch.bucketize(normalized_actions, bins, right=True) - 1
-        discrete_actions = torch.clamp(discrete_actions, 0, num_discrete_actions - 1)
-
-        # Convert to one-hot encoding and flatten, cast to float
-        one_hot_actions = F.one_hot(discrete_actions, num_classes=num_discrete_actions).float()
-        return one_hot_actions.view(actions.size(0), -1)
-
-    # Convert both old and new actions to one-hot encoded representations
-    old_one_hot = convert_to_discrete_one_hot(old_actions)
-    new_one_hot = convert_to_discrete_one_hot(new_actions)
-    
-    # Calculate cosine similarity between the two sets of actions
-    similarity = F.cosine_similarity(old_one_hot, new_one_hot, dim=1)  # (batch,)
-    
-    # Adjust the similarity range from [-1, 1] to [0, 1] and return the mean similarity
-    adjusted_similarity = (similarity + 1) / 2
-    mean_similarity = adjusted_similarity.mean().item()
-    
-    return mean_similarity
+    return ((F.cosine_similarity(old_actions, new_actions)+1)/2).mean().item()
 
 class Cohort:
     def __init__(self):
@@ -232,9 +200,6 @@ class ReplayBuffer:
         else:
             self.currant_action = Action.Normal
 
-        if self.prioritize:
-            self.half_clear()
-
 
     def _validate(self, model: nn.Sequential) -> Tuple[float, float]:
         g_similarity, b_similarity = 0, 0
@@ -280,20 +245,6 @@ class ReplayBuffer:
         self.upper_bound = 0
         self.lower_bound = 0
         self.currant_action = Action.Normal
-
-    
-    def half_clear(self):
-        # Remove the top 50% from bad_buffer (worst half based on reward)
-        if len(self.bad_buffer) == self.bad_buffer.maxlen:
-            sorted_bad = sorted(self.bad_buffer, key=lambda x: x.reward, reverse=True)  # Higher rewards are worse
-            half_len = len(sorted_bad) // 2
-            self.bad_buffer = CustomDeque(sorted_bad[half_len:], maxlen=self.bad_buffer.maxlen)
-        
-        # Remove the lowest 50% from good_buffer (best half based on reward)
-        if len(self.good_buffer) == self.good_buffer.maxlen:
-            sorted_good = sorted(self.good_buffer, key=lambda x: x.reward)  # Lower rewards are better
-            half_len = len(sorted_good) // 2
-            self.good_buffer = CustomDeque(sorted_good[half_len:], maxlen=self.good_buffer.maxlen)
 
 
     def __len__(self) -> int:
