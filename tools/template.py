@@ -43,7 +43,7 @@ model = nn.Sequential(
 # define your hyper parameters from ConfigClass
 config = ATGENConfig()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # in my case i use mps
 population_size: int
 ne = NeuroEvolution(population_size, model, config)
 
