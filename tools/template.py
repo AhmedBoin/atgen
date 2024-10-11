@@ -48,7 +48,7 @@ population_size: int
 ne = NeuroEvolution(population_size, model, config) # you can also add memory = ReplayBuffer()
 
 # train for generation number or fitness level
-ne.evolve(fitness=280, log_name="template", metrics=0, plot=True)
+ne.evolve(fitness=300, log_name="template", metrics=0, plot=True)
 
 # load best solution
 model = ne.best_individual
