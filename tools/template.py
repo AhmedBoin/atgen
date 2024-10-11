@@ -45,7 +45,7 @@ config = ATGENConfig()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # in my case i use mps
 population_size: int
-ne = NeuroEvolution(population_size, model, config)
+ne = NeuroEvolution(population_size, model, config) # you can also add memory = ReplayBuffer()
 
 # train for generation number or fitness level
 ne.evolve(fitness=280, log_name="template", metrics=0, plot=True)
