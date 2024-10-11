@@ -1,17 +1,22 @@
 # Adaptive Tensor of Augmented Topology (ATGEN)
 
 **Adaptive Tensor of Augmented Topology (ATGEN)** is a novel evolutionary framework designed to optimize neural networks for control and reinforcement learning (RL) tasks. Leveraging adaptive genetic algorithms, ATGEN enhances the process of evolving neural network architectures and weights, surpassing the limitations of traditional backpropagation-based training.
+![ATGEN](./FrameWork.png)
 
 This repository contains the implementation of ATGEN, focusing on dynamically evolving neural networks by tuning both topology and weights over generations. ATGEN optimizes the balance between exploration and exploitation through an adaptive approach, which adjusts mutation rates and crossover parameters based on the state of the population and the fitness landscape. This mechanism accelerates convergence while ensuring robustness in finding optimal or near-optimal solutions in large search spaces.
 ---
 
 ### Key Features
-![Network Evolution](./network_evolution.png)
 - **Dynamic Evolution of Network Topology and Weights**: ATGEN allows for networks to evolve both structurally (adding/removing layers, adjusting filters) and parametrically (modifying weights), adapting to the problem at hand.
+![Crossover](./crossover.png)
+![Mutation](./mutation.png)
 - **Exploration-Exploitation Tradeoff**: ATGEN starts with a high mutation rate for global exploration, gradually decaying to emphasize exploitation as the search progresses. This strategy ensures that the algorithm quickly discovers promising solutions and refines them efficiently.
 - **Support for Continuous and Discrete Action Spaces**: ATGEN is capable of optimizing models that operate in both continuous and discrete action spaces, making it highly versatile for a variety of RL tasks.
 - **Genetic Algorithm Enhancements**: The framework includes advanced genetic techniques such as speciation, elite selection, and crossover methods (e.g., order-based, uniform) to optimize performance.
 - **Integrated Fitness Evaluation**: ATGEN calculates fitness scores based on rewards or other user-defined metrics, and utilizes a selective mechanism to ensure only the most promising individuals progress to future generations.
+- **Neural Network Blending Mechanism** along side of Identity usage, introducing an alternative blending mechanism for activation function to compromise between linearity and non-linearity
+![ActiSwitch Layer](./ActiSwitch.png)
+![Blending Mechanism](./Blending.png)
 ---
 
 ### How It Works
@@ -28,6 +33,8 @@ ATGEN is designed to excel in environments that require both neural network opti
 - **Reinforcement Learning Games**: Optimizing agents for complex environments like OpenAI Gym's CarRacing and LunarLander.
 - **Control Systems**: Adapting neural networks for autonomous systems, robotics, and other control-based applications.
 - **Optimization Problems**: Solving large-scale optimization challenges that require fine-tuning of both architecture and weights.
+- **Computer Vision Support**: new innovative way to handle CNN for GA Agent.
+![VAE](./VAE.png)
 ---
 
 ### How to Use
