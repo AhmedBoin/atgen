@@ -29,6 +29,8 @@ class NeuroEvolution(ATGEN):
         # define your own backpropagation function, no return required
         pass
 
+    # also you can use pre_generation or post_generation if requires
+
 
 # define your model or load one, it should be Sequential model
 in_features: int
