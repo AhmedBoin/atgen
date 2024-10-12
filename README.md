@@ -53,7 +53,7 @@ ATGEN is designed to excel in environments that require both neural network opti
 3. **Custom Configurations**: Modify the `ATGENConfig` class or YAML configuration files to adjust parameters such as mutation rates, crossover methods, and population size.
 
 ### Citation
-If you use ATGEN in your research or projects, please cite the paper:
+If you use any idea purposed in ATGEN in your research or projects, please cite the paper:
 
 ```bibtex
 @article{taha2024revival,
