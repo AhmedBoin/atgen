@@ -57,7 +57,7 @@ If you use any idea purposed in ATGEN in your research or projects, please cite 
 
 ```bibtex
 @article{taha2024revival,
-  title={The Revival of Natural Selection},
+  title={The Revival of Natural Selection: Advanced Accelerated Technique for Complex Control Tasks},
   author={Mohamed A. Taha},
   journal={To be published},
   year={2024},
