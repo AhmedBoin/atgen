@@ -13,8 +13,6 @@ This repository contains the implementation of ATGEN, focusing on dynamically ev
   Your browser does not support the video tag.
 </video>
 
-https://github.com/user-attachments/assets/fbcab330-2bb2-4afe-9b01-f36794cef2b4
-
 ---
 
 ### Key Features
