@@ -8,9 +8,6 @@ This repository contains the implementation of ATGEN, focusing on dynamically ev
 ---
 
 ## Video Demo
-<video src="https://github.com/AhmedBoin/atgen/raw/main/Playback.mp4" controls autoplay loop muted>
-  Your browser does not support the video tag.
-</video>
 
 
 
