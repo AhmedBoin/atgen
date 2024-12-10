@@ -4,9 +4,8 @@
 ![ATGEN](./FrameWork.png)
 
 This repository contains the implementation of ATGEN, focusing on dynamically evolving neural networks by tuning both topology and weights over generations. ATGEN optimizes the balance between exploration and exploitation through an adaptive approach, which adjusts mutation rates and crossover parameters based on the state of the population and the fitness landscape. This mechanism accelerates convergence while ensuring robustness in finding optimal or near-optimal solutions in large search spaces.
-<video src="https://github.com/AhmedBoin/atgen/blob/main/Playback.mp4" controls width="640" height="448">
-  Your browser does not support the video tag.
-</video>
+
+[Watch the Video](https://github.com/AhmedBoin/atgen/releases/download/VERSION/Playback.mp4)
 ---
 
 ### Key Features
