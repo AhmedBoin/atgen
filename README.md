@@ -12,7 +12,7 @@ This repository contains the implementation of ATGEN, focusing on dynamically ev
   Your browser does not support the video tag.
 </video>
 
-![Watch Playback Video](https://github.com/AhmedBoin/atgen/raw/main/Playback.mp4)
+[Watch Playback Video](https://github.com/AhmedBoin/atgen/raw/main/Playback.mp4)
 
 ---
 
