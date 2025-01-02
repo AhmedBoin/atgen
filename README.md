@@ -65,6 +65,7 @@ ATGEN is designed to excel in environments that require both neural network opti
 ### Contact
 
 For questions, collaborations, or feedback, feel free to reach out:
+
 	•	📧 Gmail: [Ahmed.Boin@gmail.com]
 	•	💼 LinkedIn: [https://www.linkedin.com/in/ahmed-boin/]
 	•	🐦 Twitter: [https://x.com/AhmedBoin]
